@@ -588,8 +588,19 @@ namespace CdRepo {
             $wmp = $wmpHost.GetOcx()
             if (-not $wmp) { throw "Le controle WMP heberge n a pas pu etre obtenu (GetOcx null)." }
             Write-ModuleTrace 'Rip audio : controle WMP heberge operationnel.'
-            $cdroms = $wmp.cdromCollection
-            if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
+            Write-ModuleTrace 'Rip audio : interrogation de cdromCollection (late-binding sur le controle heberge)...'
+            $cdroms = $null
+            $tries = 0
+            while (-not $cdroms -and $tries -lt 10) {
+                $tries++
+                try { $cdroms = $wmp.cdromCollection } catch {
+                    Write-ModuleTrace "Rip audio : cdromCollection indisponible (essai $tries/10) : $($_.Exception.Message)"
+                    [void][System.Windows.Forms.Application]::DoEvents()
+                    Start-Sleep -Milliseconds 500
+                }
+            }
+            if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible apres $tries essais." }
+            Write-ModuleTrace 'Rip audio : cdromCollection obtenu.'
             $cdrom = $null
             try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
             if (-not $cdrom) {
