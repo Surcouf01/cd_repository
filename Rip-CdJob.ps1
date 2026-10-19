@@ -37,12 +37,14 @@ try {
     Import-Module (Join-Path $here 'CdRepository.psd1') -Force
     Write-RipTrace 'Module importe dans le sous-job.'
 
+    Write-RipTrace 'Definition du callback de progression...'
     $cb = {
         param([int]$pct, [string]$detail)
         Write-RipProgress -Percent $pct -Detail $detail
     }
-
+    Write-RipTrace 'Callback pret. Appel de Invoke-CdAudioRipInternal...'
     $ripped = @(Invoke-CdAudioRipInternal -DriveLetter $DriveLetter -ProgressCallback $cb)
+    Write-RipTrace "Retour de Invoke-CdAudioRipInternal : $($ripped.Count) fichier(s)."
     Write-RipTrace "Sous-job rip termine : $($ripped.Count) fichier(s)."
     $list = ($ripped | ForEach-Object { $_.FullName }) -join '|'
     Add-Content -Path $ProgressFile -Value "RIPDONE|$list" -Encoding UTF8

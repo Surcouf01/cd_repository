@@ -555,9 +555,12 @@ function Invoke-CdAudioRipInternal {
         [scriptblock]$ProgressCallback,
         [int]$TimeoutMinutes = 90
     )
+    Write-ModuleTrace 'Rip interne : entree dans la fonction.'
     $drive = $DriveLetter.TrimEnd('\',':')
     New-WmpRipRaw
+    Write-ModuleTrace 'Rip interne : binder compile/verifie.'
     Add-Type -AssemblyName System.Windows.Forms
+    Write-ModuleTrace 'Rip interne : WinForms charge.'
     $logFile = $env:CdRepoLogFile
     if (-not $logFile) { $logFile = Join-Path $env:TEMP 'CdRepositoryJob.log' }
     $wmpPath = Get-WmpDllPath
