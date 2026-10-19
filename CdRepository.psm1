@@ -518,104 +518,116 @@ function Invoke-CdAudioRip {
     $drive = $DriveLetter.TrimEnd('\',':')
     New-WmpRipRaw
     Add-Type -AssemblyName System.Windows.Forms
+    if (-not ('CdRepo.WmpHost' -as [type])) {
+        Add-Type -ReferencedAssemblies System.Windows.Forms.dll, System.Drawing.dll -TypeDefinition @'
+using System;
+using System.Windows.Forms;
+namespace CdRepo {
+    public class WmpHost : AxHost {
+        public WmpHost() : base("{6BF52A4F-394A-11D3-B153-00C04F79FAA6}") { }
+    }
+}
+'@
+    }
     $logFile = $env:CdRepoLogFile
     if (-not $logFile) { $logFile = Join-Path $env:TEMP 'CdRepositoryJob.log' }
     $wmpPath = Get-WmpDllPath
     Write-ModuleTrace "Rip audio : typelib source : $wmpPath"
-    Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
-    $wmp = New-Object -ComObject WMPlayer.OCX.7
-    Write-ModuleTrace 'Rip audio : objet WMP cree.'
+    Write-ModuleTrace 'Rip audio : le controle sera heberge dans un conteneur ActiveX (AxHost) - hebergement complet requis par startRip.'
     $script:RipResult = $null
     $script:RipError = $null
-    try {
-        $cdroms = $wmp.cdromCollection
-        if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
-        Write-ModuleTrace "Rip audio : recherche du lecteur ${drive}: dans la collection WMP..."
-        $cdrom = $null
-        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
-        if (-not $cdrom) {
-            for ($k = 0; $k -lt $cdroms.count; $k++) {
-                $c = $cdroms.Item($k)
-                if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
-            }
-        }
-        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
-        $trackCount = 0
-        try { $trackCount = $cdrom.Playlist.count } catch { }
-        if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
-        Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
-        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
+    $form = New-Object System.Windows.Forms.Form
+    $form.WindowState = 'Minimized'
+    $form.ShowInTaskbar = $false
+    $form.Opacity = 0
+    $wmpHost = New-Object CdRepo.WmpHost
+    $wmpHost.Dock = 'Fill'
+    $form.Controls.Add($wmpHost)
 
-        $ripStart = Get-Date
-        $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-        $raw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
-        Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW] dans le log).'
+    $ripStart = Get-Date
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
 
-        $form = New-Object System.Windows.Forms.Form
-        $form.WindowState = 'Minimized'
-        $form.ShowInTaskbar = $false
-        $form.Opacity = 0
-
-        $timer = New-Object System.Windows.Forms.Timer
-        $timer.Interval = 1000
-        $poll = 0
-        $timer.Add_Tick({
-            try {
-                $poll++
-                $state = $raw.GetState()
-                $pct = $raw.GetProgress()
-                if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
-                if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
-                if ($state -ne 1) {
-                    Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)."
-                    $script:RipResult = 'done'
-                    $timer.Stop()
-                    $form.Close()
-                }
-                elseif ((Get-Date) -gt $deadline) {
-                    try { $raw.StopRip() } catch { }
-                    $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
-                    $timer.Stop()
-                    $form.Close()
-                }
-            }
-            catch {
-                $script:RipError = "Surveillance du rip : $($_.Exception.Message)"
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 1000
+    $poll = 0
+    $timer.Add_Tick({
+        try {
+            $poll++
+            $state = $raw.GetState()
+            $pct = $raw.GetProgress()
+            if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
+            if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
+            if ($state -ne 1) {
+                Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)."
+                $script:RipResult = 'done'
                 $timer.Stop()
                 $form.Close()
             }
-        })
-
-        $form.Add_Shown({
-            try {
-                Write-ModuleTrace 'Rip audio : pompe active, appel de startRip (slot vtable typelib)...'
-                $raw.StartRip()
-                Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
-                $timer.Start()
-            }
-            catch {
-                $script:RipError = "startRip : $($_.Exception.Message)"
+            elseif ((Get-Date) -gt $deadline) {
+                try { $raw.StopRip() } catch { }
+                $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
+                $timer.Stop()
                 $form.Close()
             }
-        })
-
-        [void][System.Windows.Forms.Application]::Run($form)
-
-        if ($script:RipError) { throw $script:RipError }
-        if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat." }
-
-        if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
-        Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
-        $ripped = Get-RippedFiles -Since $ripStart
-        Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
-        if ($ripped.Count -eq 0) {
-            throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
         }
-        return $ripped
+        catch {
+            $script:RipError = "Surveillance du rip : $($_.Exception.Message)"
+            $timer.Stop()
+            $form.Close()
+        }
+    })
+
+    $form.Add_Shown({
+        try {
+            Write-ModuleTrace 'Rip audio : formulaire affiche, controle ActiveX instancie par le conteneur...'
+            $wmp = $wmpHost.GetOcx()
+            if (-not $wmp) { throw "Le controle WMP heberge n a pas pu etre obtenu (GetOcx null)." }
+            Write-ModuleTrace 'Rip audio : controle WMP heberge operationnel.'
+            $cdroms = $wmp.cdromCollection
+            if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
+            $cdrom = $null
+            try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
+            if (-not $cdrom) {
+                for ($k = 0; $k -lt $cdroms.count; $k++) {
+                    $c = $cdroms.Item($k)
+                    if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
+                }
+            }
+            if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
+            $trackCount = 0
+            try { $trackCount = $cdrom.Playlist.count } catch { }
+            if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
+            Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
+            if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
+            $script:RipCdrom = $cdrom
+            $raw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
+            Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW]).'
+            Write-ModuleTrace 'Rip audio : appel de startRip (controle heberge, pompe active, slots typelib)...'
+            $raw.StartRip()
+            Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
+            $timer.Start()
+        }
+        catch {
+            $script:RipError = "initialisation du rip : $($_.Exception.Message)"
+            Write-ModuleTrace "Rip audio : erreur init : $($_.Exception.Message)"
+            $timer.Stop()
+            $form.Close()
+        }
+    })
+
+    [void][System.Windows.Forms.Application]::Run($form)
+
+    if ($script:RipError) { throw $script:RipError }
+    if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat." }
+
+    if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
+    Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
+    $ripped = Get-RippedFiles -Since $ripStart
+    Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
+    if ($ripped.Count -eq 0) {
+        throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
     }
-    finally {
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wmp)
-    }
+    return $ripped
 }
 
 function Copy-CdToRepository {
