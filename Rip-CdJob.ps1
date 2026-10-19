@@ -12,6 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $LogFile) { $LogFile = Join-Path $env:TEMP 'CdRepositoryRip.log' }
+$env:CdRepoLogFile = $LogFile
 
 function Write-RipTrace {
     param([string]$Message)
