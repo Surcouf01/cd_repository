@@ -651,8 +651,13 @@ $controls['BtnRip'].Add_Click({
     $modulePath = Join-Path $here 'CdRepository.psd1'
 
     # Copie locale des scripts (un chemin UNC peut empecher le lancement du job)
+    # Inconditionnelle : ecrase toute version stale laissee par une session precedente
     $localDir = Join-Path $env:TEMP 'cdrepo_job'
     if (-not (Test-Path $localDir)) { New-Item -ItemType Directory -Path $localDir -Force | Out-Null }
+    Get-ChildItem -LiteralPath $localDir -Filter 'cdrepo_progress_*.txt' -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $localDir -Filter 'cdrepo_ripprogress_*.txt' -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     $localJob = Join-Path $localDir 'Copy-CdJob.ps1'
     $localMod = Join-Path $localDir 'CdRepository.psd1'
     $localPsm = Join-Path $localDir 'CdRepository.psm1'
@@ -663,6 +668,7 @@ $controls['BtnRip'].Add_Click({
     if (Test-Path (Join-Path $here 'Rip-CdJob.ps1')) {
         Copy-Item -LiteralPath (Join-Path $here 'Rip-CdJob.ps1') -Destination (Join-Path $localDir 'Rip-CdJob.ps1') -Force
     }
+    Write-TraceLog "[GUI] Scripts locaux rafraichis (ecrasement inconditionnel)." -Color 'Cyan'
     if (Test-Path (Join-Path $here 'config.json')) {
         Copy-Item -LiteralPath (Join-Path $here 'config.json') -Destination $localCfg -Force
     }
