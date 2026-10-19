@@ -464,10 +464,16 @@ namespace CdRepo {
         Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
         $state = 1
+        $poll = 0
+        Write-ModuleTrace "Rip audio : surveillance de la progression (interrogation toutes les secondes, timeout $TimeoutMinutes min)..."
         while ($state -eq 1) {
             Start-Sleep -Milliseconds 1000
+            $poll++
             $st = [CdRepo.WmpRip]::GetStatus($cdrom)
             $state = $st.State
+            if ($poll % 5 -eq 1) {
+                Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$($st.Percent) %."
+            }
             if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $($st.Percent) %)." }
             if ($ProgressCallback) { & $ProgressCallback $st.Percent ("Extraction audio : $($st.Percent) %") }
             if ((Get-Date) -gt $deadline) {
