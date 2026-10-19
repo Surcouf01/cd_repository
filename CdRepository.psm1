@@ -507,6 +507,120 @@ namespace CdRepo {
     }
 }
 
+function Invoke-CdAudioRipInternal {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DriveLetter,
+        [scriptblock]$ProgressCallback,
+        [int]$TimeoutMinutes = 90
+    )
+    $drive = $DriveLetter.TrimEnd('\',':')
+    New-WmpRipRaw
+    Add-Type -AssemblyName System.Windows.Forms
+    $logFile = $env:CdRepoLogFile
+    if (-not $logFile) { $logFile = Join-Path $env:TEMP 'CdRepositoryJob.log' }
+    $wmpPath = Get-WmpDllPath
+    Write-ModuleTrace "Rip audio : typelib source : $wmpPath"
+    Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
+    $wmp = New-Object -ComObject WMPlayer.OCX.7
+    Write-ModuleTrace 'Rip audio : objet WMP cree.'
+    $script:RipResult = $null
+    $script:RipError = $null
+    try {
+        $cdroms = $wmp.cdromCollection
+        if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
+        Write-ModuleTrace "Rip audio : getByDriveSpecifier('${drive}:')..."
+        $cdrom = $null
+        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
+        if (-not $cdrom) {
+            Write-ModuleTrace 'Rip audio : enumeration de la collection...'
+            for ($k = 0; $k -lt $cdroms.count; $k++) {
+                $c = $cdroms.Item($k)
+                if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
+            }
+        }
+        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
+        Write-ModuleTrace 'Rip audio : lecteur trouve. Lecture de la playlist...'
+        $trackCount = 0
+        try { $trackCount = $cdrom.Playlist.count } catch { Write-ModuleTrace "Rip audio : playlist a echoue : $($_.Exception.Message)" }
+        if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
+        Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
+
+        $ripStart = Get-Date
+        $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+        $script:RipRaw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
+        Write-ModuleTrace 'Rip audio : binder vtable operationnel (slots typelib, details [WMPRAW]).'
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.WindowState = 'Minimized'
+        $form.ShowInTaskbar = $false
+        $form.Opacity = 0
+
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 1000
+        $poll = 0
+        $timer.Add_Tick({
+            try {
+                $poll++
+                $state = $script:RipRaw.GetState()
+                $pct = $script:RipRaw.GetProgress()
+                if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
+                if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
+                if ($state -ne 1) {
+                    Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)."
+                    $script:RipResult = 'done'
+                    $timer.Stop()
+                    $form.Close()
+                }
+                elseif ((Get-Date) -gt $deadline) {
+                    try { $script:RipRaw.StopRip() } catch { }
+                    $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
+                    $timer.Stop()
+                    $form.Close()
+                }
+            }
+            catch {
+                $script:RipError = "Surveillance du rip : $($_.Exception.Message)"
+                $timer.Stop()
+                $form.Close()
+            }
+        })
+
+        $form.Add_Shown({
+            try {
+                Write-ModuleTrace 'Rip audio : pompe active, appel de startRip (slot typelib)...'
+                $script:RipRaw.StartRip()
+                Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
+                $timer.Start()
+            }
+            catch {
+                $script:RipError = "startRip : $($_.Exception.Message)"
+                Write-ModuleTrace "Rip audio : erreur startRip : $($_.Exception.Message)"
+                $timer.Stop()
+                $form.Close()
+            }
+        })
+
+        [void][System.Windows.Forms.Application]::Run($form)
+
+        if ($script:RipError) { throw $script:RipError }
+        if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat." }
+
+        if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
+        Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
+        $ripped = Get-RippedFiles -Since $ripStart
+        Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
+        if ($ripped.Count -eq 0) {
+            throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
+        }
+        return $ripped
+    }
+    finally {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wmp)
+    }
+}
+
 function Invoke-CdAudioRip {
     [CmdletBinding()]
     param(
@@ -1060,7 +1174,7 @@ function Move-CdEntry {
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
     'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
-    'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Get-KnownMusicFolder','Get-RippedFiles',
+    'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Invoke-CdAudioRipInternal','Get-KnownMusicFolder','Get-RippedFiles',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
     'Get-CdCategories','Update-CdCategories','Move-CdEntry'

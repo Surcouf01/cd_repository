@@ -42,7 +42,7 @@ try {
         Write-RipProgress -Percent $pct -Detail $detail
     }
 
-    $ripped = @(Invoke-CdAudioRip -DriveLetter $DriveLetter -ProgressCallback $cb)
+    $ripped = @(Invoke-CdAudioRipInternal -DriveLetter $DriveLetter -ProgressCallback $cb)
     Write-RipTrace "Sous-job rip termine : $($ripped.Count) fichier(s)."
     $list = ($ripped | ForEach-Object { $_.FullName }) -join '|'
     Add-Content -Path $ProgressFile -Value "RIPDONE|$list" -Encoding UTF8
