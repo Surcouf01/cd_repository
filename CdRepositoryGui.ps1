@@ -1,13 +1,55 @@
 #Requires -Version 5.1
+[CmdletBinding()]
+param(
+    [switch]$VerboseErrors
+)
 <#
 .SYNOPSIS
     Interface graphique WPF du repository de compact disks (NAS Synology via SMB).
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\CdRepositoryGui.ps1
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\CdRepositoryGui.ps1 -VerboseErrors
+    Affiche et journalise toutes les erreurs non gerees (fichier CdRepositoryGui.log a cote du script).
 #>
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+$script:VerboseErrors = [bool]$VerboseErrors
+$script:LogFile = Join-Path $here 'CdRepositoryGui.log'
+
+function Write-ErrorLog {
+    param([string]$Context, [object]$Error)
+    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Context]"
+    if ($Error -is [System.Management.Automation.ErrorRecord]) {
+        $line += " $($Error.Exception.GetType().FullName): $($Error.Exception.Message)"
+        if ($Error.InvocationInfo) {
+            $line += "`n    at $($Error.InvocationInfo.PositionMessage)"
+        }
+        if ($Error.Exception.InnerException) {
+            $line += "`n    inner: $($Error.Exception.InnerException.Message)"
+        }
+    }
+    else { $line += " $Error" }
+    try { Add-Content -Path $script:LogFile -Value $line -Encoding UTF8 } catch { }
+    if ($script:VerboseErrors) {
+        Write-Host $line -ForegroundColor Yellow
+    }
+}
+
+if ($script:VerboseErrors) { $ErrorActionPreference = 'Continue'; $Error.Clear() }
+
+trap {
+    Write-ErrorLog -Context 'UNHANDLED' -Error $_
+    if ($script:VerboseErrors) {
+        [System.Windows.MessageBox]::Show(
+            "Erreur non geree :`n$($_.Exception.Message)`n`nVoir CdRepositoryGui.log pour les details.",
+            'Erreur', 'OK', 'Error') | Out-Null
+    }
+    continue
+}
+
 Import-Module (Join-Path $here 'CdRepository.psd1') -Force
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
@@ -511,7 +553,7 @@ $controls['BtnRip'].Add_Click({
     $uiHash = @{ Queue = $uiQueue }
     $null = $ps.AddArgument($uiHash)
     $ps.Runspace = [runspacefactory]::CreateRunspace()
-    $ps.Runspace.ApartmentState = 'MTA'
+    $ps.Runspace.ApartmentState = 'STA'
     $ps.Runspace.Open()
 
     $script:CopyPs = $ps
@@ -538,10 +580,14 @@ $controls['BtnRip'].Add_Click({
         }
         if ($script:CopyResult.IsCompleted) {
             $script:CopyTimer.Stop()
+            $result = $script:CopyResult
             $script:CopyResult = $null
+            $psInstance = $script:CopyPs
+            $script:CopyPs = $null
             try {
-                $out = $script:CopyPs.EndInvoke($script:CopyResult)
-                $errs = @($script:CopyPs.Streams.Error.ReadAll())
+                $out = $psInstance.EndInvoke($result)
+                $errs = @($psInstance.Streams.Error.ReadAll())
+                foreach ($e in $errs) { Write-ErrorLog -Context 'COPY-RUNSPACE' -Error $e }
                 if ($errs.Count -gt 0) {
                     $errMsg = $errs[0].Exception.Message
                     Set-Status "Erreur : $errMsg" -Error
@@ -562,13 +608,18 @@ $controls['BtnRip'].Add_Click({
                     }
                 }
             }
-            catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
+            catch {
+                Write-ErrorLog -Context 'COPY-ENDINVOKE' -Error $_
+                Set-Status "Erreur : $($_.Exception.Message)" -Error
+                [System.Windows.MessageBox]::Show(
+                    "La copie s'est terminee de facon anormale :`n`n$($_.Exception.Message)`n`nDetails dans CdRepositoryGui.log.",
+                    'Erreur de copie', 'OK', 'Error') | Out-Null
+            }
             finally {
                 $script:CopyQueue.Clear()
                 Hide-CopyOverlay
-                $script:CopyPs.Runspace.Close()
-                $script:CopyPs.Dispose()
-                $script:CopyPs = $null
+                try { $psInstance.Runspace.Close() } catch { Write-ErrorLog -Context 'RUNSPACE-CLOSE' -Error $_ }
+                try { $psInstance.Dispose() } catch { }
                 Update-DiskGrid
             }
         }
