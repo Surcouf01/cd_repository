@@ -458,15 +458,19 @@ function Invoke-CdAudioRip {
     )
     $drive = $DriveLetter.TrimEnd('\',':')
     Get-WmpInteropAssembly
+    Add-Type -AssemblyName System.Windows.Forms
+    Write-ModuleTrace 'Rip audio : boucle de messages WinForms (pattern requis par le controle ActiveX WMP).'
     Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
     Write-ModuleTrace 'Rip audio : objet WMP cree.'
+    $script:RipResult = $null
+    $script:RipError = $null
     try {
         $cdroms = $wmp.cdromCollection
         if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
         Write-ModuleTrace "Rip audio : recherche du lecteur ${drive}: dans la collection WMP..."
         $cdrom = $null
-        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
+        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
         if (-not $cdrom) {
             for ($k = 0; $k -lt $cdroms.count; $k++) {
                 $c = $cdroms.Item($k)
@@ -474,49 +478,69 @@ function Invoke-CdAudioRip {
             }
         }
         if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
-        Write-ModuleTrace 'Rip audio : lecteur trouve. Lecture de la playlist...'
-        $playlist = $cdrom.Playlist
         $trackCount = 0
-        try { $trackCount = $playlist.count } catch { }
+        try { $trackCount = $cdrom.Playlist.count } catch { }
         if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
         Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
 
-        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Demarrage du rip..." }
         $ripStart = Get-Date
-        Write-ModuleTrace 'Rip audio : appel de startRip (QI fait en C#)...'
-        [CdRepo.WmpRip]::StartRip($cdrom)
-        Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
-
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
-        Write-ModuleTrace 'Rip audio : pompe de messages ActiveX (DoEvents) - requis par WMP.'
-        $null = [System.Windows.Forms.Application]::DoEvents()
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-        $lastPoll = Get-Date
-        $state = 1
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.WindowState = 'Minimized'
+        $form.ShowInTaskbar = $false
+        $form.Opacity = 0
+
+        $timer = New-Object System.Windows.Forms.Timer
+        $timer.Interval = 1000
         $poll = 0
-        $pct = 0
-        Write-ModuleTrace "Rip audio : surveillance (timeout $TimeoutMinutes min)..."
-        while ($state -eq 1) {
-            [void][System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 100
-            $tick = Get-Date
-            if (($tick - $lastPoll).TotalMilliseconds -lt 1000) { continue }
-            $lastPoll = $tick
-            $poll++
-            $st = [CdRepo.WmpRip]::GetStatus($cdrom)
-            $state = $st.State
-            $pct = $st.Percent
-            if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
-            if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)." }
-            if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
-            if ((Get-Date) -gt $deadline) {
-                try { [CdRepo.WmpRip]::StopRip($cdrom) } catch { }
-                throw "Timeout du rip audio apres $TimeoutMinutes minutes."
+        $timer.Add_Tick({
+            try {
+                $poll++
+                $st = [CdRepo.WmpRip]::GetStatus($cdrom)
+                $state = $st.State
+                $pct = $st.Percent
+                if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
+                if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
+                if ($state -ne 1) {
+                    Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)."
+                    $script:RipResult = 'done'
+                    $timer.Stop()
+                    $form.Close()
+                }
+                elseif ((Get-Date) -gt $deadline) {
+                    try { [CdRepo.WmpRip]::StopRip($cdrom) } catch { }
+                    $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
+                    $timer.Stop()
+                    $form.Close()
+                }
             }
-        }
-        if ($state -ne 2) {
-            throw "Le rip audio s est termine de facon inattendue (etat $state)."
-        }
+            catch {
+                $script:RipError = "Surveillance du rip : $($_.Exception.Message)"
+                $timer.Stop()
+                $form.Close()
+            }
+        })
+
+        $form.Add_Shown({
+            try {
+                Write-ModuleTrace 'Rip audio : formulaire affiche (pompe active), appel de startRip...'
+                [CdRepo.WmpRip]::StartRip($cdrom)
+                Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
+                $timer.Start()
+            }
+            catch {
+                $script:RipError = "startRip : $($_.Exception.Message)"
+                $form.Close()
+            }
+        })
+
+        [void][System.Windows.Forms.Application]::Run($form)
+
+        if ($script:RipError) { throw $script:RipError }
+        if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat (formulaire ferme prematurement)." }
+
         if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
         Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
         $ripped = Get-RippedFiles -Since $ripStart
