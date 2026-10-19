@@ -234,18 +234,34 @@ $controls['GridDisks'].ItemsSource = $viewModels
 function Update-DiskGrid {
     $viewModels.Clear()
     $cat = $controls['CmbCategory'].SelectedItem
-    $disks = Show-CdIndex -Raw
+    $index = Get-CdIndex
+    $disks = @($index.disks)
     if ($cat -and $cat -ne '(toutes)') {
-        $disks = @($disks | Where-Object { (Get-MediaCategory $_.category) -eq (Get-MediaCategory $cat) })
+        $want = Get-MediaCategory $cat
+        $disks = @($disks | Where-Object {
+            $c = $null
+            if ($_.PSObject.Properties['category']) { $c = $_.category }
+            (Get-MediaCategory $c) -eq $want
+        })
     }
     foreach ($d in $disks) {
+        $dc = $null
+        if ($d.PSObject.Properties['category']) { $dc = $d.category }
+        $sz = 0
+        if ($d.PSObject.Properties['sizeBytes'] -and $d.sizeBytes) { $sz = $d.sizeBytes }
+        $added = ''
+        if ($d.PSObject.Properties['addedUtc'] -and $d.addedUtc) {
+            try { $added = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd') } catch { $added = [string]$d.addedUtc }
+        }
+        $desc = ''
+        if ($d.PSObject.Properties['description']) { $desc = $d.description }
         $viewModels.Add([pscustomobject]@{
             Id          = $d.id
             Title       = $d.title
-            Category    = Get-MediaCategory $d.category
-            SizeMB      = [math]::Round($d.sizeBytes / 1MB, 1)
-            Added       = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd')
-            Description = $d.description
+            Category    = Get-MediaCategory $dc
+            SizeMB      = [math]::Round($sz / 1MB, 1)
+            Added       = $added
+            Description = $desc
         })
     }
     Set-Status "$($viewModels.Count) disque(s) affiche(s)."
@@ -306,28 +322,54 @@ $controls['GridDisks'].Add_SelectionChanged({ Update-ContentPane })
 
 $controls['BtnSearch'].Add_Click({
     Wait-Cursor {
-        $q = $controls['TxtSearch'].Text.Trim()
-        if (-not $q) { Update-DiskGrid; return }
-        $cat = $controls['CmbCategory'].SelectedItem
-        $index = Get-CdIndex
-        $hits = @($index.disks | Where-Object {
-            (($_.title, $_.description, $_.fileName, ($_.contents -join ' ')) -join ' ').ToLower() -match [regex]::Escape($q.ToLower())
-        })
-        if ($cat -and $cat -ne '(toutes)') {
-            $hits = @($hits | Where-Object { (Get-MediaCategory $_.category) -eq (Get-MediaCategory $cat) })
-        }
-        $viewModels.Clear()
-        foreach ($d in $hits) {
-            $viewModels.Add([pscustomobject]@{
-                Id          = $d.id
-                Title       = $d.title
-                Category    = Get-MediaCategory $d.category
-                SizeMB      = [math]::Round($d.sizeBytes / 1MB, 1)
-                Added       = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd')
-                Description = $d.description
+        try {
+            $q = $controls['TxtSearch'].Text.Trim()
+            if (-not $q) { Update-DiskGrid; return }
+            $cat = $controls['CmbCategory'].SelectedItem
+            $index = Get-CdIndex
+            $all = @($index.disks)
+            $hits = @($all | Where-Object {
+                $parts = @()
+                foreach ($p in 'title','description','fileName','contents') {
+                    if ($_.PSObject.Properties[$p]) {
+                        if ($p -eq 'contents') { $parts += [string]($_.contents -join ' ') }
+                        else { $parts += [string]$_.$p }
+                    }
+                }
+                ($parts -join ' ').ToLower() -match [regex]::Escape($q.ToLower())
             })
+            if ($cat -and $cat -ne '(toutes)') {
+                $want = Get-MediaCategory $cat
+                $hits = @($hits | Where-Object {
+                    $c = $null
+                    if ($_.PSObject.Properties['category']) { $c = $_.category }
+                    (Get-MediaCategory $c) -eq $want
+                })
+            }
+            $viewModels.Clear()
+            foreach ($d in $hits) {
+                $dc = $null
+                if ($d.PSObject.Properties['category']) { $dc = $d.category }
+                $sz = 0
+                if ($d.PSObject.Properties['sizeBytes'] -and $d.sizeBytes) { $sz = $d.sizeBytes }
+                $added = ''
+                if ($d.PSObject.Properties['addedUtc'] -and $d.addedUtc) {
+                    try { $added = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd') } catch { $added = [string]$d.addedUtc }
+                }
+                $desc = ''
+                if ($d.PSObject.Properties['description']) { $desc = $d.description }
+                $viewModels.Add([pscustomobject]@{
+                    Id          = $d.id
+                    Title       = $d.title
+                    Category    = Get-MediaCategory $dc
+                    SizeMB      = [math]::Round($sz / 1MB, 1)
+                    Added       = $added
+                    Description = $desc
+                })
+            }
+            Set-Status "$($hits.Count) resultat(s) pour '$q'."
         }
-        Set-Status "$($hits.Count) resultat(s) pour '$q'."
+        catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
     }
 })
 
@@ -338,7 +380,13 @@ $controls['BtnClear'].Add_Click({
 })
 
 $controls['CmbCategory'].Add_SelectionChanged({
-    if ($viewModels) { Update-DiskGrid }
+    $q = ''
+    if ($controls['TxtSearch'].Text) { $q = $controls['TxtSearch'].Text.Trim() }
+    if ($q) {
+        $controls['BtnSearch'].RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
+    } else {
+        try { Update-DiskGrid } catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
+    }
 })
 
 $controls['BtnRip'].Add_Click({
