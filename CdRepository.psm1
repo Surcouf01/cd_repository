@@ -315,14 +315,36 @@ function Mount-CdFromRepository {
     }
 
     $img = Mount-DiskImage -ImagePath $iso -NoDriveLetter -PassThru
+    $mounted = $false
     try {
-        $vol = Get-Volume -DiskImage $img
-        if (-not $vol) { throw "Impossible d'acceder au volume de l'image." }
-        $part = Get-Partition -Volume $vol
-        $null = Add-PartitionAccessPath -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -AccessPath "$($letter):\"
-    } catch {
+        $vol = Get-Volume -DiskImage $img -ErrorAction SilentlyContinue
+        $part = $null
+        if ($vol) { $part = Get-Partition -Volume $vol -ErrorAction SilentlyContinue }
+        if ($part -and $null -ne $part.DiskNumber -and $null -ne $part.PartitionNumber) {
+            $null = Add-PartitionAccessPath -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -AccessPath "$($letter):\" -ErrorAction Stop
+            $mounted = $true
+        }
+        if (-not $mounted) {
+            $diskImg = Get-DiskImage -ImagePath $iso
+            if ($null -ne $diskImg.Number) {
+                $parts = Get-Partition -DiskNumber $diskImg.Number -ErrorAction SilentlyContinue
+                if ($parts -and $null -ne $parts[0].PartitionNumber) {
+                    $null = Add-PartitionAccessPath -DiskNumber $diskImg.Number -PartitionNumber $parts[0].PartitionNumber -AccessPath "$($letter):\" -ErrorAction Stop
+                    $mounted = $true
+                }
+            }
+        }
+    } catch { $mounted = $false }
+    if (-not $mounted) {
         Dismount-DiskImage -ImagePath $iso | Out-Null
-        throw
+        $img2 = Mount-DiskImage -ImagePath $iso -PassThru
+        $vol2 = Get-Volume -DiskImage $img2 -ErrorAction SilentlyContinue
+        if ($vol2 -and $vol2.DriveLetter) {
+            $letter = [string]$vol2.DriveLetter
+        } else {
+            throw "Montage impossible : Windows n'a attribue aucune lettre de lecteur."
+        }
+        $img = $img2
     }
     Write-Host "Monte : $($entry.title) -> ${letter}:"
     return [pscustomobject]@{ Letter = $letter; Image = $img; Id = $Id }
