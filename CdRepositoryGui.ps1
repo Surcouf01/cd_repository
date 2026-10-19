@@ -40,7 +40,6 @@ $xamlText = @'
                 <TextBox x:Name="TxtSearch" Width="220" Height="24"
                          VerticalContentAlignment="Center" ToolTip="Recherche titre, description, fichier, contenu"/>
                 <ComboBox x:Name="CmbCategory" Width="130" Height="24" Margin="6,0,0,0"/>
-                <Button x:Name="BtnSearch" Content="Rechercher" Width="95" Margin="6,0,0,0"/>
                 <Button x:Name="BtnClear"   Content="Effacer"   Width="70" Margin="6,0,0,0"/>
             </StackPanel>
         </DockPanel>
@@ -88,7 +87,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 
 $controls = @{}
 foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh',
-               'TxtSearch','CmbCategory','BtnSearch','BtnClear',
+               'TxtSearch','CmbCategory','BtnClear',
                'GridDisks','ListContent','TxtStatus') {
     $controls[$n] = $window.FindName($n)
 }
@@ -177,7 +176,7 @@ function Show-CopyOverlay {
 
     $script:OverlayWindow.Owner = $window
     $script:Busy = $true
-    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnSearch','BtnClear') {
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear') {
         $controls[$b].IsEnabled = $false
     }
     [void]$script:OverlayWindow.Show()
@@ -208,7 +207,7 @@ function Hide-CopyOverlay {
         $script:OverlayWindow = $null
     }
     $script:Busy = $false
-    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnSearch','BtnClear') {
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear') {
         $controls[$b].IsEnabled = $true
     }
 }
@@ -320,58 +319,81 @@ $controls['BtnRefresh'].Add_Click({ Wait-Cursor { Update-DiskGrid } })
 
 $controls['GridDisks'].Add_SelectionChanged({ Update-ContentPane })
 
-$controls['BtnSearch'].Add_Click({
-    Wait-Cursor {
-        try {
-            $q = $controls['TxtSearch'].Text.Trim()
-            if (-not $q) { Update-DiskGrid; return }
-            $cat = $controls['CmbCategory'].SelectedItem
-            $index = Get-CdIndex
-            $all = @($index.disks)
-            $hits = @($all | Where-Object {
-                $parts = @()
-                foreach ($p in 'title','description','fileName','contents') {
-                    if ($_.PSObject.Properties[$p]) {
-                        if ($p -eq 'contents') { $parts += [string]($_.contents -join ' ') }
-                        else { $parts += [string]$_.$p }
-                    }
+function Invoke-Search {
+    $q = ''
+    if ($controls['TxtSearch'].Text) { $q = $controls['TxtSearch'].Text.Trim() }
+    try {
+        if (-not $q) { Update-DiskGrid; return }
+        $cat = $controls['CmbCategory'].SelectedItem
+        $index = Get-CdIndex
+        $all = @($index.disks)
+        $hits = @($all | Where-Object {
+            $parts = @()
+            foreach ($p in 'title','description','fileName','contents') {
+                if ($_.PSObject.Properties[$p]) {
+                    if ($p -eq 'contents') { $parts += [string]($_.contents -join ' ') }
+                    else { $parts += [string]$_.$p }
                 }
-                ($parts -join ' ').ToLower() -match [regex]::Escape($q.ToLower())
+            }
+            ($parts -join ' ').ToLower() -match [regex]::Escape($q.ToLower())
+        })
+        if ($cat -and $cat -ne '(toutes)') {
+            $want = Get-MediaCategory $cat
+            $hits = @($hits | Where-Object {
+                $c = $null
+                if ($_.PSObject.Properties['category']) { $c = $_.category }
+                (Get-MediaCategory $c) -eq $want
             })
-            if ($cat -and $cat -ne '(toutes)') {
-                $want = Get-MediaCategory $cat
-                $hits = @($hits | Where-Object {
-                    $c = $null
-                    if ($_.PSObject.Properties['category']) { $c = $_.category }
-                    (Get-MediaCategory $c) -eq $want
-                })
-            }
-            $viewModels.Clear()
-            foreach ($d in $hits) {
-                $dc = $null
-                if ($d.PSObject.Properties['category']) { $dc = $d.category }
-                $sz = 0
-                if ($d.PSObject.Properties['sizeBytes'] -and $d.sizeBytes) { $sz = $d.sizeBytes }
-                $added = ''
-                if ($d.PSObject.Properties['addedUtc'] -and $d.addedUtc) {
-                    try { $added = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd') } catch { $added = [string]$d.addedUtc }
-                }
-                $desc = ''
-                if ($d.PSObject.Properties['description']) { $desc = $d.description }
-                $viewModels.Add([pscustomobject]@{
-                    Id          = $d.id
-                    Title       = $d.title
-                    Category    = Get-MediaCategory $dc
-                    SizeMB      = [math]::Round($sz / 1MB, 1)
-                    Added       = $added
-                    Description = $desc
-                })
-            }
-            Set-Status "$($hits.Count) resultat(s) pour '$q'."
         }
-        catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
+        $viewModels.Clear()
+        foreach ($d in $hits) {
+            $dc = $null
+            if ($d.PSObject.Properties['category']) { $dc = $d.category }
+            $sz = 0
+            if ($d.PSObject.Properties['sizeBytes'] -and $d.sizeBytes) { $sz = $d.sizeBytes }
+            $added = ''
+            if ($d.PSObject.Properties['addedUtc'] -and $d.addedUtc) {
+                try { $added = ([datetime]$d.addedUtc).ToString('yyyy-MM-dd') } catch { $added = [string]$d.addedUtc }
+            }
+            $desc = ''
+            if ($d.PSObject.Properties['description']) { $desc = $d.description }
+            $viewModels.Add([pscustomobject]@{
+                Id          = $d.id
+                Title       = $d.title
+                Category    = Get-MediaCategory $dc
+                SizeMB      = [math]::Round($sz / 1MB, 1)
+                Added       = $added
+                Description = $desc
+            })
+        }
+        Set-Status "$($hits.Count) resultat(s) pour '$q'."
+    }
+    catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
+}
+
+$script:SearchTimer = $null
+
+$controls['TxtSearch'].Add_TextChanged({
+    if ($script:SearchTimer) { $script:SearchTimer.Stop() }
+    $t = New-Object System.Windows.Threading.DispatcherTimer
+    $t.Interval = [TimeSpan]::FromMilliseconds(300)
+    $t.Add_Tick({
+        $script:SearchTimer.Stop()
+        Invoke-Search
+    })
+    $script:SearchTimer = $t
+    $t.Start()
+})
+
+$controls['TxtSearch'].Add_KeyDown({
+    if ($_.Key -eq 'Enter') {
+        if ($script:SearchTimer) { $script:SearchTimer.Stop() }
+        Invoke-Search
+        $_.Handled = $true
     }
 })
+
+$controls['BtnSearch'].Add_Click({ Invoke-Search })
 
 $controls['BtnClear'].Add_Click({
     $controls['TxtSearch'].Text = ''
@@ -380,13 +402,8 @@ $controls['BtnClear'].Add_Click({
 })
 
 $controls['CmbCategory'].Add_SelectionChanged({
-    $q = ''
-    if ($controls['TxtSearch'].Text) { $q = $controls['TxtSearch'].Text.Trim() }
-    if ($q) {
-        $controls['BtnSearch'].RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
-    } else {
-        try { Update-DiskGrid } catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
-    }
+    if ($script:SearchTimer) { $script:SearchTimer.Stop() }
+    Invoke-Search
 })
 
 $controls['BtnRip'].Add_Click({
