@@ -31,6 +31,13 @@ try {
     Import-Module $ModulePath -Force
     Write-JobTrace 'Module importe.'
 
+    Write-JobTrace 'Verification des prerequis (Quiet)...'
+    $req = Test-CdRepositoryRequirements -Quiet
+    Write-JobTrace "Prerequis : WMP dll=$($req.WmpDll) COM=$($req.WmpCom) IMAPI=$($req.Imapi) config=$($req.Config) NAS=$($req.Nas) admin=$($req.Admin)"
+    if (-not $req.Nas) {
+        throw "Repository NAS inaccessible : verifiez le partage SMB et config.json."
+    }
+
     $cb = {
         param([int]$pct, [string]$detail)
         try { Add-Content -Path $ProgressFile -Value "$pct|$detail" -Encoding UTF8 } catch { }

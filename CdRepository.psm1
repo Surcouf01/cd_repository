@@ -199,6 +199,88 @@ namespace CdRepo {
     }
 }
 
+function Test-CdRepositoryRequirements {
+    [CmdletBinding()]
+    param([switch]$Quiet)
+
+    $results = New-Object System.Collections.ArrayList
+    function Add-Result([string]$Name, [bool]$Ok, [string]$Detail) {
+        [void]$results.Add([pscustomobject]@{ Check = $Name; Ok = $Ok; Detail = $Detail })
+        Write-ModuleTrace ("Prerequis '{0}' : {1} - {2}" -f $Name, $(if ($Ok) {'OK'} else {'ECHEC'}), $Detail)
+    }
+
+    $wmpPaths = @(
+        (Join-Path $env:ProgramFiles 'Windows Media Player\wmp.dll'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Windows Media Player\wmp.dll')
+    )
+    $wmpDll = $wmpPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    Add-Result 'Windows Media Player (wmp.dll)' ([bool]$wmpDll) $(if ($wmpDll) { "present : $wmpDll" } else { 'introuvable - installez : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player' })
+
+    $wmpCom = $false
+    $wmpComDetail = ''
+    if ($wmpDll) {
+        try {
+            $test = New-Object -ComObject WMPlayer.OCX.7 -ErrorAction Stop
+            $wmpCom = $true
+            $wmpComDetail = 'objet COM WMPlayer.OCX.7 cree avec succes'
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($test)
+        } catch {
+            $wmpComDetail = "creation COM WMPlayer.OCX.7 echouee : $($_.Exception.Message)"
+        }
+    } else {
+        $wmpComDetail = 'wmp.dll absent, test COM ignore'
+    }
+    Add-Result 'WMP pilotable par COM' $wmpCom $wmpComDetail
+
+    $imapi = $false
+    $imapiDetail = ''
+    try {
+        $t = [type]::GetTypeFromProgID('IMAPI2FS.MsftFileSystemImage')
+        if ($t) { $imapi = $true; $imapiDetail = 'IMAPI2FS disponible' }
+        else { $imapiDetail = 'IMAPI2FS.MsftFileSystemImage introuvable' }
+    } catch { $imapiDetail = "erreur : $($_.Exception.Message)" }
+    Add-Result 'IMAPI2 (creation ISO)' $imapi $imapiDetail
+
+    $cfg = $null
+    $cfgOk = $false
+    $cfgDetail = ''
+    try {
+        $cfg = Import-CdConfig
+        $cfgOk = $true
+        $cfgDetail = "racine : $($cfg.RepositoryRoot)"
+    } catch { $cfgDetail = $_.Exception.Message }
+    Add-Result 'Configuration (config.json)' $cfgOk $cfgDetail
+
+    $nasOk = $false
+    $nasDetail = ''
+    if ($cfgOk -and $cfg) {
+        if (Test-Path $cfg.RepositoryRoot) { $nasOk = $true; $nasDetail = "accesible : $($cfg.RepositoryRoot)" }
+        else { $nasDetail = "inaccessible : $($cfg.RepositoryRoot) - verifiez le partage SMB" }
+    } else { $nasDetail = 'configuration non chargee' }
+    Add-Result 'Repository NAS (SMB)' $nasOk $nasDetail
+
+    $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    Add-Result 'Droits administrateur' $admin $(if ($admin) { 'requis pour le montage ISO : OK' } else { 'montage ISO indisponible sans elevation' })
+
+    $missing = @($results | Where-Object { -not $_.Ok })
+    if (-not $Quiet) {
+        foreach ($r in $results) {
+            $icon = if ($r.Ok) { '[OK]  ' } else { '[ECHEC]' }
+            Write-Host ("{0} {1} : {2}" -f $icon, $r.Check, $r.Detail)
+        }
+    }
+    return [pscustomobject]@{
+        AllOk       = ($missing.Count -eq 0)
+        WmpDll      = [bool]$wmpDll
+        WmpCom      = $wmpCom
+        Imapi       = $imapi
+        Config      = $cfgOk
+        Nas         = $nasOk
+        Admin       = $admin
+        Results     = $results
+    }
+}
+
 function Test-CdIsAudio {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$DriveLetter)
@@ -806,7 +888,7 @@ function Move-CdEntry {
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
     'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
-    'Test-CdIsAudio','Invoke-CdAudioRip','Get-KnownMusicFolder','Get-RippedFiles',
+    'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Get-KnownMusicFolder','Get-RippedFiles',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
     'Get-CdCategories','Update-CdCategories','Move-CdEntry'
