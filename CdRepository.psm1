@@ -79,7 +79,7 @@ function New-IsoImageFromDirectory {
         [Parameter(Mandatory)][string]$VolumeLabel
     )
     if (-not (Test-Path $SourceDirectory)) { throw "Repertoire source introuvable : $SourceDirectory" }
-    if (-not ('CdRepo.IsoMaker' -as [type])) {
+    if (-not ('CdRepo.IsoStream' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -87,18 +87,10 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
 namespace CdRepo {
-    public static class IsoMaker {
-        public static void Create(string sourceDir, string isoPath, string volumeLabel) {
-            Type t = Type.GetTypeFromProgID("IMAPI2.MsftFileSystemImage");
-            if (t == null) throw new Exception("IMAPI2 indisponible (Windows uniquement).");
-            dynamic fsi = Activator.CreateInstance(t);
-            fsi.VolumeName = volumeLabel;
-            fsi.FileSystemsToCreate = 3;             // ISO9660 + Joliet
-            fsi.ChooseImageDefaultsForMediaType(12); // CD ~650 Mo
-            fsi.Root.AddTree(sourceDir, false);
-            dynamic result = fsi.CreateResultImage();
-            IStream image = (IStream)result.ImageStream;
-            using (FileStream fs = new FileStream(isoPath, FileMode.Create, FileAccess.Write)) {
+    public static class IsoStream {
+        public static void CopyStream(object comStream, string destinationIso) {
+            IStream image = (IStream)comStream;
+            using (FileStream fs = new FileStream(destinationIso, FileMode.Create, FileAccess.Write)) {
                 byte[] buf = new byte[1048576];
                 IntPtr pcb = Marshal.AllocHGlobal(8);
                 try {
@@ -116,7 +108,19 @@ namespace CdRepo {
 }
 '@
     }
-    [CdRepo.IsoMaker]::Create((Resolve-Path $SourceDirectory).Path, [System.IO.Path]::GetFullPath($DestinationIso), $VolumeLabel)
+    $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
+    try {
+        $fsi.VolumeName = $VolumeLabel
+        $fsi.FileSystemsToCreate = 3   # ISO9660 + Joliet
+        $fsi.ChooseImageDefaultsForMediaType(12)  # CD ~650-700 Mo
+        $fsi.Root.AddTree((Resolve-Path $SourceDirectory).Path, $false)
+        $result = $fsi.CreateResultImage()
+        [CdRepo.IsoStream]::CopyStream($result.ImageStream, [System.IO.Path]::GetFullPath($DestinationIso))
+    }
+    finally {
+        if ($null -ne $result) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($result) }
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($fsi)
+    }
 }
 
 function Copy-CdToRepository {
@@ -150,7 +154,7 @@ function Copy-CdToRepository {
     $tempRoot = Join-Path $env:TEMP ("cdrepo_" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
-        Write-Host "Copie locale du contenu du disque ($srcRoot -> $tempRoot)..."
+        Write-Host "Copie locale du contenu du disque ($src -> $tempRoot)..."
         Get-ChildItem -LiteralPath $srcRoot -Force | ForEach-Object {
             if ($_.PSIsContainer) {
                 Copy-Item -LiteralPath $_.FullName -Destination $tempRoot -Recurse -Force
@@ -169,6 +173,12 @@ function Copy-CdToRepository {
         if (-not $NoIndex) {
             New-CdIndex | Out-Null
             $index = Get-CdIndex
+            $files = Get-ChildItem -LiteralPath $tempRoot -Recurse -Force -File -ErrorAction SilentlyContinue
+            $top = Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 30
+            $contents = @(
+                foreach ($f in ($top | ForEach-Object { $_.Name })) { $f }
+                if ($files.Count -gt 0) { "[$($files.Count) fichiers au total, $([math]::Round(($files | Measure-Object Length -Sum).Sum/1MB,1)) Mo]" }
+            )
             $entry = [pscustomobject]@{
                 id          = [guid]::NewGuid().ToString()
                 title       = $Title
@@ -178,14 +188,8 @@ function Copy-CdToRepository {
                 sizeBytes   = $size
                 addedUtc    = (Get-Date).ToUniversalTime().ToString('o')
                 sourceLabel = $vol.FileSystemLabel
-                contents    = @()
+                contents    = $contents
             }
-            $files = Get-ChildItem -LiteralPath $tempRoot -Recurse -Force -File -ErrorAction SilentlyContinue
-            $top = Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue | Select-Object -First 30
-            $entry.contents = @(
-                foreach ($f in ($top | ForEach-Object { $_.Name })) { $f }
-                if ($files.Count -gt 0) { "[$($files.Count) fichiers au total, $([math]::Round(($files | Measure-Object Length -Sum).Sum/1MB,1)) Mo]" }
-            )
             $index.disks += $entry
             Save-CdIndex -Index $index
             Write-Host "Index mis a jour."
@@ -399,8 +403,8 @@ function Move-CdEntry {
 
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
-    'Get-DriveLettersInUse','Get-MediaCategory','Copy-CdToRepository',
-    'Mount-CdFromRepository','Dismount-CdFromRepository','Remove-CdFromRepository',
-    'Show-CdIndex','Search-CdIndex','Show-CdContent','Get-CdCategories',
-    'Update-CdCategories','Move-CdEntry'
+    'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
+    'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
+    'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
+    'Get-CdCategories','Update-CdCategories','Move-CdEntry'
 )
