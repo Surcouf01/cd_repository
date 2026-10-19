@@ -37,22 +37,23 @@ $xamlText = @'
                 <Button x:Name="BtnRefresh" Content="Actualiser"     Width="85"  Margin="0,0,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                <Grid Width="220" Height="24">
-                    <TextBox x:Name="TxtSearch" VerticalContentAlignment="Center"
+                <Grid Width="220">
+                    <TextBox x:Name="TxtSearch" Height="24" VerticalContentAlignment="Center" Background="White"
                              ToolTip="Recherche dynamique : titre, description, fichier, contenu"/>
-                    <TextBlock x:Name="TxtSearchHint" Text="Recherche"
-                               Foreground="Gray" FontStyle="Italic" VerticalAlignment="Center"
-                               IsHitTestVisible="False" Margin="4,0,0,0">
+                    <TextBlock x:Name="TxtSearchHint" Text="Recherche" Height="24"
+                               Foreground="Gray" FontStyle="Italic" VerticalAlignment="Center" HorizontalAlignment="Left"
+                               IsHitTestVisible="False" Margin="6,0,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Text, ElementName=TxtSearch}" Value="">
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Text, ElementName=TxtSearch}" Value=""/>
+                                            <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=TxtSearch}" Value="False"/>
+                                        </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsKeyboardFocused, ElementName=TxtSearch}" Value="True">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
+                                    </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
@@ -391,6 +392,10 @@ function Invoke-Search {
 }
 
 $script:SearchTimer = $null
+
+$controls['TxtSearch'].Add_GotMouseCapture({
+    [System.Windows.Input.Keyboard]::Focus($controls['TxtSearch']) | Out-Null
+})
 
 $controls['TxtSearch'].Add_TextChanged({
     if ($script:SearchTimer) { $script:SearchTimer.Stop() }
