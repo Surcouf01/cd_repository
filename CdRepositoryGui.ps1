@@ -496,10 +496,12 @@ $controls['BtnRip'].Add_Click({
                   ToolTip="Lettres detectees automatiquement ; modifiable si besoin"/>
         <TextBlock Grid.Row="2" Text="Titre :"/>
         <TextBox x:Name="DlgTitle" Grid.Row="3" Height="24" Margin="0,4,0,8"/>
-        <TextBlock Grid.Row="4" Text="Categorie :"/>
-        <ComboBox x:Name="DlgCat" Grid.Row="5" Height="24" Margin="0,4,0,8"/>
-        <TextBlock Grid.Row="6" Text=""/>
-        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+        <TextBlock x:Name="DlgLabel" Grid.Row="4" Foreground="Gray" FontStyle="Italic" FontSize="11" Margin="0,0,0,8"
+                   Text="Titre du disque : (aucun disque detecte)" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Grid.Row="5" Text="Categorie :"/>
+        <ComboBox x:Name="DlgCat" Grid.Row="6" Height="24" Margin="0,4,0,8"/>
+        <TextBlock Grid.Row="7" Text=""/>
+        <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="DlgOk" Content="Copier" Width="90" Margin="0,0,8,0" IsDefault="True"/>
             <Button x:Name="DlgCancel" Content="Annuler" Width="90" IsCancel="True"/>
         </StackPanel>
@@ -509,8 +511,23 @@ $controls['BtnRip'].Add_Click({
     $dialog = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
     $dlgLetter = $dialog.FindName('DlgLetter')
     $dlgTitle  = $dialog.FindName('DlgTitle')
+    $dlgLabel  = $dialog.FindName('DlgLabel')
     $dlgCat    = $dialog.FindName('DlgCat')
     $dlgOk     = $dialog.FindName('DlgOk')
+    $dlgLetter.Add_SelectionChanged({
+        $sel = $dlgLetter.Text.Trim().TrimEnd(':', '\')
+        if (-not $sel) { $dlgLabel.Text = ''; return }
+        $vol = Get-Volume -DriveLetter $sel -ErrorAction SilentlyContinue
+        if ($vol -and $vol.FileSystemLabel) {
+            $dlgLabel.Text = "Titre du disque : $($vol.FileSystemLabel)"
+        }
+        elseif ($vol) {
+            $dlgLabel.Text = "Titre du disque : (CD audio ou disque sans nom)"
+        }
+        else {
+            $dlgLabel.Text = "Titre du disque : (aucun disque dans $sel:)"
+        }
+    })
     $dlgOk.Add_Click({ $dialog.DialogResult = $true })
     foreach ($c in (Get-CdCategories)) { $dlgCat.Items.Add($c) | Out-Null }
     $curCat = $controls['CmbCategory'].SelectedItem
@@ -568,6 +585,10 @@ $controls['BtnRip'].Add_Click({
 
     $progressFile = Join-Path $localDir ("cdrepo_progress_" + [guid]::NewGuid().ToString('N') + '.txt')
     if (Test-Path $progressFile) { Remove-Item $progressFile -Force }
+    $jobLog = Join-Path $localDir 'job.log'
+    if (Test-Path $jobLog) { Remove-Item $jobLog -Force }
+    $script:JobLogPath = $jobLog
+    $script:JobLogPos = 0
 
     $script:CopyProgressFile = $progressFile
     $script:CopyProgressPos = 0
@@ -584,7 +605,7 @@ $controls['BtnRip'].Add_Click({
         '-Title', (Quote-Arg $title),
         '-Category', (Quote-Arg $cat),
         '-ProgressFile', (Quote-Arg $progressFile),
-        '-LogFile', (Quote-Arg $script:LogFile)
+        '-LogFile', (Quote-Arg $jobLog)
     )
     Write-TraceLog "[GUI] Lancement du processus isole : powershell $($procArgs -join ' ')" -Color 'Cyan'
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $procArgs -PassThru -WindowStyle Hidden
@@ -596,6 +617,17 @@ $controls['BtnRip'].Add_Click({
     $script:CopyTimer = $timer
     $timer.Add_Tick({
         if ($script:CopyDone) { $script:CopyTimer.Stop(); return }
+
+        if ($script:JobLogPath -and (Test-Path $script:JobLogPath)) {
+            try {
+                $jobLines = [System.IO.File]::ReadAllLines($script:JobLogPath)
+                for ($j = $script:JobLogPos; $j -lt $jobLines.Count; $j++) {
+                    Write-Host $jobLines[$j] -ForegroundColor DarkCyan
+                    try { Add-Content -Path $script:LogFile -Value $jobLines[$j] -Encoding UTF8 } catch { }
+                }
+                $script:JobLogPos = $jobLines.Count
+            } catch { }
+        }
 
         if (Test-Path $script:CopyProgressFile) {
             try {
