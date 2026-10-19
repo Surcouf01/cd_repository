@@ -37,8 +37,27 @@ $xamlText = @'
                 <Button x:Name="BtnRefresh" Content="Actualiser"     Width="85"  Margin="0,0,0,0"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                <TextBox x:Name="TxtSearch" Width="220" Height="24"
-                         VerticalContentAlignment="Center" ToolTip="Recherche titre, description, fichier, contenu"/>
+                <Grid Width="220" Height="24">
+                    <TextBox x:Name="TxtSearch" VerticalContentAlignment="Center"
+                             ToolTip="Recherche dynamique : titre, description, fichier, contenu"/>
+                    <TextBlock x:Name="TxtSearchHint" Text="Recherche"
+                               Foreground="Gray" FontStyle="Italic" VerticalAlignment="Center"
+                               IsHitTestVisible="False" Margin="4,0,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=TxtSearch}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsKeyboardFocused, ElementName=TxtSearch}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
                 <ComboBox x:Name="CmbCategory" Width="130" Height="24" Margin="6,0,0,0"/>
                 <Button x:Name="BtnClear"   Content="Effacer"   Width="70" Margin="6,0,0,0"/>
             </StackPanel>
