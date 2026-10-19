@@ -558,8 +558,8 @@ namespace CdRepo {
     $timer.Add_Tick({
         try {
             $poll++
-            $state = $raw.GetState()
-            $pct = $raw.GetProgress()
+            $state = $script:RipRaw.GetState()
+            $pct = $script:RipRaw.GetProgress()
             if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
             if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
             if ($state -ne 1) {
@@ -569,7 +569,7 @@ namespace CdRepo {
                 $form.Close()
             }
             elseif ((Get-Date) -gt $deadline) {
-                try { $raw.StopRip() } catch { }
+                try { $script:RipRaw.StopRip() } catch { }
                 $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
                 $timer.Stop()
                 $form.Close()
@@ -615,11 +615,10 @@ namespace CdRepo {
             if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
             Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
             if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
-            $script:RipCdrom = $cdrom
-            $raw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
+            $script:RipRaw = [CdRepo.WmpRaw]::Bind($script:RipCdrom, $wmpPath, $logFile)
             Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW]).'
             Write-ModuleTrace 'Rip audio : appel de startRip (controle heberge, pompe active, slots typelib)...'
-            $raw.StartRip()
+            $script:RipRaw.StartRip()
             Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
             $timer.Start()
         }
