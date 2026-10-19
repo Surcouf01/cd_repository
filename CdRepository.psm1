@@ -639,7 +639,9 @@ function Invoke-CdAudioRip {
     $dir = Join-Path $env:TEMP 'cdrepo_job'
     $localRip = Join-Path $dir 'Rip-CdJob.ps1'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    Copy-Item -LiteralPath $ripJob -Destination $localRip -Force
+    if (-not (Test-Path $localRip)) {
+        Copy-Item -LiteralPath $ripJob -Destination $localRip -Force
+    }
 
     $ripProgress = Join-Path $dir ("cdrepo_ripprogress_" + [guid]::NewGuid().ToString('N') + '.txt')
     if (Test-Path $ripProgress) { Remove-Item $ripProgress -Force }
