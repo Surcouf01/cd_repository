@@ -8,6 +8,7 @@
     FunctionsToExport = @(
         'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
         'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
+        'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Get-KnownMusicFolder','Get-RippedFiles',
         'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
         'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
         'Get-CdCategories','Update-CdCategories','Move-CdEntry'
