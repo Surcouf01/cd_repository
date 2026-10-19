@@ -37,6 +37,14 @@ try {
     if (-not $req.Nas) {
         throw "Repository NAS inaccessible : verifiez le partage SMB et config.json."
     }
+    $hasFs = [bool](Get-PSDrive $DriveLetter.TrimEnd(':', '\') -ErrorAction SilentlyContinue)
+    if (-not $hasFs -and -not $req.WmpCom) {
+        $isAudio = $false
+        try { $isAudio = Test-CdIsAudio -DriveLetter $DriveLetter } catch { $isAudio = $true }
+        if ($isAudio) {
+            throw "CD audio detecte mais Windows Media Player est absent ou non pilotable. Installation : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player (ou : Add-WindowsCapability -Online -Name 'Media.WindowsMediaPlayer')."
+        }
+    }
 
     $cb = {
         param([int]$pct, [string]$detail)

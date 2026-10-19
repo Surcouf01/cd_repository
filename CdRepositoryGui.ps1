@@ -47,8 +47,10 @@ Import-Module (Join-Path $here 'CdRepository.psd1') -Force
 Write-TraceLog "Module importe."
 
 Write-TraceLog '--- Verification des prerequis ---' -Color 'Cyan'
+$script:Requirements = $null
 try {
     $req = Test-CdRepositoryRequirements
+    $script:Requirements = $req
     foreach ($r in $req.Results) {
         Write-TraceLog ("{0} {1} : {2}" -f $(if ($r.Ok) {'[OK]  '} else {'[ECHEC]'}), $r.Check, $r.Detail) -Color $(if ($r.Ok) {'Green'} else {'Red'})
     }
@@ -570,6 +572,28 @@ $controls['BtnRip'].Add_Click({
     if (-not $letter -or -not $title) {
         Set-Status 'Lettre du lecteur et titre requis.' -Error
         return
+    }
+
+    $hasFs = [bool](Get-PSDrive $letter.TrimEnd(':', '\') -ErrorAction SilentlyContinue)
+    $isAudio = $false
+    if (-not $hasFs) {
+        try { $isAudio = Test-CdIsAudio -DriveLetter $letter } catch { $isAudio = $false }
+    }
+    if (-not $hasFs) {
+        if ($isAudio -and -not $script:Requirements.WmpCom) {
+            Set-Status 'Copie impossible : CD audio et Windows Media Player absent.' -Error
+            [System.Windows.MessageBox]::Show(
+                "Ce CD audio ne peut pas etre copie : Windows Media Player est absent ou non pilotable.`n`nInstallation : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player`nou (admin) : Add-WindowsCapability -Online -Name 'Media.WindowsMediaPlayer'`n`nLes CD de donnees ne sont pas concernes par cette limitation.",
+                'Windows Media Player requis', 'OK', 'Error') | Out-Null
+            return
+        }
+        if (-not $isAudio) {
+            Set-Status "Aucun disque lisible dans ${letter}:." -Error
+            [System.Windows.MessageBox]::Show(
+                "Aucun disque avec systeme de fichiers detecte dans ${letter}:, et il ne s'agit pas d'un CD audio reconnu.",
+                'Disque illisible', 'OK', 'Warning') | Out-Null
+            return
+        }
     }
     $cat = $dlgCat.SelectedItem
     if (-not $cat) { $cat = 'autre' }
