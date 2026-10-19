@@ -393,8 +393,6 @@ $controls['TxtSearch'].Add_KeyDown({
     }
 })
 
-$controls['BtnSearch'].Add_Click({ Invoke-Search })
-
 $controls['BtnClear'].Add_Click({
     $controls['TxtSearch'].Text = ''
     $controls['CmbCategory'].SelectedIndex = 0
