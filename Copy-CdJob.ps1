@@ -29,6 +29,9 @@ function Write-JobTrace {
 
 try {
     Write-JobTrace "Demarrage du job (PID $PID) : lecteur='$DriveLetter' titre='$Title' categorie='$Category'"
+    $bits = '64 bits'
+    try { if (-not [Environment]::Is64BitProcess) { $bits = '32 bits' } } catch { }
+    Write-JobTrace "Processus : $bits (Is64BitProcess=$([Environment]::Is64BitProcess))"
     Write-JobTrace "Import du module : $ModulePath"
     Import-Module $ModulePath -Force
     Write-JobTrace 'Module importe.'

@@ -523,7 +523,7 @@ using System;
 using System.Windows.Forms;
 namespace CdRepo {
     public class WmpHost : AxHost {
-        public WmpHost() : base("{6BF52A4F-394A-11D3-B153-00C04F79FAA6}") { }
+        public WmpHost(string clsid) : base(clsid) { }
     }
 }
 '@
@@ -539,7 +539,13 @@ namespace CdRepo {
     $form.WindowState = 'Minimized'
     $form.ShowInTaskbar = $false
     $form.Opacity = 0
-    $wmpHost = New-Object CdRepo.WmpHost
+    $wmpClsid = $null
+    try {
+        $wmpClsid = (Get-ItemProperty -Path 'Registry::HKEY_CLASSES_ROOT\WMPlayer.OCX.7\CLSID' -ErrorAction Stop).'(default)'
+    } catch { }
+    if (-not $wmpClsid) { throw "CLSID du controle WMP introuvable dans le registre (WMPlayer.OCX.7)." }
+    Write-ModuleTrace "Rip audio : CLSID du controle (registre) : $wmpClsid"
+    $wmpHost = New-Object CdRepo.WmpHost($wmpClsid)
     $wmpHost.Dock = 'Fill'
     $form.Controls.Add($wmpHost)
 
