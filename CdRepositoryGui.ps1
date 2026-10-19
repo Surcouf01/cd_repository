@@ -347,9 +347,10 @@ $controls['BtnRip'].Add_Click({
     $dlgXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Copier un CD" Height="240" Width="440" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        Title="Copier un CD" Height="290" Width="440" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <Grid Margin="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
@@ -359,8 +360,10 @@ $controls['BtnRip'].Add_Click({
                   ToolTip="Lettres detectees automatiquement ; modifiable si besoin"/>
         <TextBlock Grid.Row="2" Text="Titre :"/>
         <TextBox x:Name="DlgTitle" Grid.Row="3" Height="24" Margin="0,4,0,8"/>
-        <TextBlock Grid.Row="4" Text=""/>
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+        <TextBlock Grid.Row="4" Text="Categorie :"/>
+        <ComboBox x:Name="DlgCat" Grid.Row="5" Height="24" Margin="0,4,0,8"/>
+        <TextBlock Grid.Row="6" Text=""/>
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="DlgOk" Content="Copier" Width="90" Margin="0,0,8,0" IsDefault="True"/>
             <Button x:Name="DlgCancel" Content="Annuler" Width="90" IsCancel="True"/>
         </StackPanel>
@@ -370,8 +373,14 @@ $controls['BtnRip'].Add_Click({
     $dialog = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
     $dlgLetter = $dialog.FindName('DlgLetter')
     $dlgTitle  = $dialog.FindName('DlgTitle')
+    $dlgCat    = $dialog.FindName('DlgCat')
     $dlgOk     = $dialog.FindName('DlgOk')
     $dlgOk.Add_Click({ $dialog.DialogResult = $true })
+    foreach ($c in (Get-CdCategories)) { $dlgCat.Items.Add($c) | Out-Null }
+    $curCat = $controls['CmbCategory'].SelectedItem
+    $ci = 0
+    if ($curCat -and $curCat -ne '(toutes)') { $ci = [array]::IndexOf((Get-CdCategories), (Get-MediaCategory $curCat)) }
+    $dlgCat.SelectedIndex = [Math]::Max(0, $ci)
 
     $letters = Get-CdDriveLetters
     foreach ($l in $letters) { $dlgLetter.Items.Add($l) | Out-Null }
@@ -394,8 +403,8 @@ $controls['BtnRip'].Add_Click({
         Set-Status 'Lettre du lecteur et titre requis.' -Error
         return
     }
-    $cat = $controls['CmbCategory'].SelectedItem
-    if (-not $cat -or $cat -eq '(toutes)') { $cat = 'autre' }
+    $cat = $dlgCat.SelectedItem
+    if (-not $cat) { $cat = 'autre' }
 
     Show-CopyOverlay -Title $title -SourceLetter $letter
 
@@ -411,6 +420,7 @@ $controls['BtnRip'].Add_Click({
     })
     $null = $ps.AddArgument($modulePath).AddArgument($letter).AddArgument($title).AddArgument($cat)
     $uiQueue = New-Object System.Collections.ArrayList
+    $script:CopyQueue = $uiQueue
     $uiHash = @{ Queue = $uiQueue }
     $null = $ps.AddArgument($uiHash)
     $ps.Runspace = [runspacefactory]::CreateRunspace()
@@ -424,9 +434,9 @@ $controls['BtnRip'].Add_Click({
     $timer.Interval = [TimeSpan]::FromMilliseconds(200)
     $script:CopyTimer = $timer
     $timer.Add_Tick({
-        while ($uiQueue.Count -gt 0) {
-            $item = $uiQueue[0]
-            $uiQueue.RemoveAt(0)
+        while ($script:CopyQueue.Count -gt 0) {
+            $item = $script:CopyQueue[0]
+            $script:CopyQueue.RemoveAt(0)
             $fileName = ''
             $detail = [string]$item.Detail
             if ($detail -match '^Copie\s*:\s*(.+?)\s*\((\d+)/(\d+)\)$') {
@@ -458,7 +468,7 @@ $controls['BtnRip'].Add_Click({
             }
             catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
             finally {
-                $uiQueue.Clear()
+                $script:CopyQueue.Clear()
                 Hide-CopyOverlay
                 $script:CopyPs.Runspace.Close()
                 $script:CopyPs.Dispose()
