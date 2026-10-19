@@ -402,7 +402,7 @@ function New-WmpRipRaw {
     [CmdletBinding()]
     param()
     if (-not ('CdRepo.WmpRaw' -as [type])) {
-        Write-ModuleTrace 'Rip audio : compilation du binder typelib (lecture reelle de la typelib de wmp.dll)...'
+        Write-ModuleTrace 'Rip audio : compilation du binder typelib v2 (collection + rip, zero GUID en dur)...'
         Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -414,12 +414,13 @@ namespace CdRepo {
     public delegate void FnVoid(IntPtr pThis);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     public delegate void FnOutInt(IntPtr pThis, out int value);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FnGetByDrive(IntPtr pThis, [MarshalAs(UnmanagedType.BStr)] string drive, out IntPtr ppCdrom);
 
     public class WmpRipRaw {
         private IntPtr _pRip;
         private FnVoid _fnStart, _fnStop;
         private FnOutInt _fnState, _fnProg;
-
         internal WmpRipRaw(IntPtr pRip, FnVoid start, FnVoid stop, FnOutInt state, FnOutInt prog) {
             _pRip = pRip; _fnStart = start; _fnStop = stop; _fnState = state; _fnProg = prog;
         }
@@ -438,62 +439,100 @@ namespace CdRepo {
             try { File.AppendAllText(logFile, "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] [WMPRAW] " + msg + Environment.NewLine); } catch { }
         }
 
-        public static WmpRipRaw Bind(object cdrom, string wmpPath, string logFile) {
-            Log(logFile, "Architecture : " + (IntPtr.Size == 8 ? "64 bits" : "32 bits") + ".");
-
-            ITypeLib tlb;
-            LoadTypeLibEx(wmpPath, 2, out tlb);
+        private static ITypeInfo FindTypeInfo(ITypeLib tlb, string name, string logFile) {
             int count = tlb.GetTypeInfoCount();
-            Log(logFile, "Typelib chargee : " + count + " types.");
-            ITypeInfo ripInfo = null;
             for (int i = 0; i < count; i++) {
-                string name, doc, help; int ctx;
-                tlb.GetDocumentation(i, out name, out doc, out ctx, out help);
-                if (name == "IWMPCdromRip") { tlb.GetTypeInfo(i, out ripInfo); Log(logFile, "IWMPCdromRip trouve (index " + i + ")."); break; }
+                string n, doc, help; int ctx;
+                tlb.GetDocumentation(i, out n, out doc, out ctx, out help);
+                if (n == name) {
+                    ITypeInfo ti;
+                    tlb.GetTypeInfo(i, out ti);
+                    Log(logFile, name + " trouve (index " + i + ").");
+                    return ti;
+                }
             }
-            if (ripInfo == null) { throw new Exception("IWMPCdromRip absent de la typelib de wmp.dll."); }
+            return null;
+        }
 
-            IntPtr pAttr;
-            ripInfo.GetTypeAttr(out pAttr);
-            System.Runtime.InteropServices.ComTypes.TYPEATTR attr = (System.Runtime.InteropServices.ComTypes.TYPEATTR)Marshal.PtrToStructure(pAttr, typeof(System.Runtime.InteropServices.ComTypes.TYPEATTR));
-            Log(logFile, "typekind=" + attr.typekind + " cFuncs=" + attr.cFuncs + " wTypeFlags=0x" + attr.wTypeFlags.ToString("X"));
-            if (attr.typekind == System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_DISPATCH) {
-                ripInfo.ReleaseTypeAttr(pAttr);
-                throw new Exception("IWMPCdromRip est une dispinterface pure : appel vtable impossible.");
-            }
-            int slotStart = -1, slotStop = -1, slotState = -1, slotProg = -1;
+        private static int FindSlot(ITypeInfo ti, TYPEATTR attr, string methodName, string logFile) {
             for (int f = 0; f < attr.cFuncs; f++) {
                 IntPtr pFd;
-                ripInfo.GetFuncDesc(f, out pFd);
-                System.Runtime.InteropServices.ComTypes.FUNCDESC fd = (System.Runtime.InteropServices.ComTypes.FUNCDESC)Marshal.PtrToStructure(pFd, typeof(System.Runtime.InteropServices.ComTypes.FUNCDESC));
+                ti.GetFuncDesc(f, out pFd);
+                FUNCDESC fd = (FUNCDESC)Marshal.PtrToStructure(pFd, typeof(FUNCDESC));
                 string[] names = new string[8];
                 int pcNames;
-                ripInfo.GetNames(fd.memid, names, names.Length, out pcNames);
+                ti.GetNames(fd.memid, names, names.Length, out pcNames);
                 string fname = (pcNames > 0 && names[0] != null) ? names[0] : "";
                 int slot = fd.oVft / IntPtr.Size;
-                Log(logFile, "func[" + f + "] " + fname + " slot=" + slot + " invkind=" + fd.invkind);
+                Log(logFile, "  " + fname + " slot=" + slot + " invkind=" + fd.invkind);
+                ti.ReleaseFuncDesc(pFd);
                 string baseName = fname;
                 if (baseName.StartsWith("get_")) { baseName = baseName.Substring(4); }
-                if (baseName == "ripState") slotState = slot;
-                else if (baseName == "ripProgress") slotProg = slot;
-                else if (baseName == "startRip") slotStart = slot;
-                else if (baseName == "stopRip") slotStop = slot;
-                ripInfo.ReleaseFuncDesc(pFd);
+                if (baseName == methodName || fname == methodName) { return slot; }
             }
-            ripInfo.ReleaseTypeAttr(pAttr);
-            Log(logFile, "slots: startRip=" + slotStart + " stopRip=" + slotStop + " ripState=" + slotState + " ripProgress=" + slotProg);
+            return -1;
+        }
+
+        public static WmpRipRaw BindByDrive(object cdromCollection, string driveSpecifier, string wmpPath, string logFile) {
+            ITypeLib tlb;
+            LoadTypeLibEx(wmpPath, 2, out tlb);
+            Log(logFile, "Typelib chargee : " + tlb.GetTypeInfoCount() + " types. Architecture : " + (IntPtr.Size == 8 ? "64 bits" : "32 bits") + ".");
+
+            ITypeInfo collInfo = FindTypeInfo(tlb, "IWMPCdromCollection", logFile);
+            if (collInfo == null) { throw new Exception("IWMPCdromCollection absent de la typelib."); }
+            IntPtr pCollAttr;
+            collInfo.GetTypeAttr(out pCollAttr);
+            TYPEATTR collAttr = (TYPEATTR)Marshal.PtrToStructure(pCollAttr, typeof(TYPEATTR));
+            Guid iidColl = collAttr.guid;
+            int slotGetBy = FindSlot(collInfo, collAttr, "getByDriveSpecifier", logFile);
+            collInfo.ReleaseTypeAttr(pCollAttr);
+            Log(logFile, "iidColl=" + iidColl + " slotGetByDriveSpecifier=" + slotGetBy);
+            if (slotGetBy < 0) { throw new Exception("getByDriveSpecifier introuvable dans la typelib."); }
+
+            ITypeInfo ripInfo = FindTypeInfo(tlb, "IWMPCdromRip", logFile);
+            if (ripInfo == null) { throw new Exception("IWMPCdromRip absent de la typelib."); }
+            IntPtr pRipAttr;
+            ripInfo.GetTypeAttr(out pRipAttr);
+            TYPEATTR ripAttr = (TYPEATTR)Marshal.PtrToStructure(pRipAttr, typeof(TYPEATTR));
+            Guid iidRip = ripAttr.guid;
+            int slotStart = FindSlot(ripInfo, ripAttr, "startRip", logFile);
+            int slotStop = FindSlot(ripInfo, ripAttr, "stopRip", logFile);
+            int slotState = FindSlot(ripInfo, ripAttr, "ripState", logFile);
+            int slotProg = FindSlot(ripInfo, ripAttr, "ripProgress", logFile);
+            ripInfo.ReleaseTypeAttr(pRipAttr);
+            Log(logFile, "iidRip=" + iidRip + " slots: startRip=" + slotStart + " stopRip=" + slotStop + " ripState=" + slotState + " ripProgress=" + slotProg);
             if (slotStart < 0 || slotStop < 0 || slotState < 0 || slotProg < 0) {
                 throw new Exception("Methode(s) du rip introuvable(s) dans la typelib.");
             }
 
-            Guid iidRip = new Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C");
-            IntPtr pUnk = Marshal.GetIUnknownForObject(cdrom);
-            IntPtr pRip = IntPtr.Zero;
-            int hr = Marshal.QueryInterface(pUnk, ref iidRip, out pRip);
-            Marshal.Release(pUnk);
-            if (hr != 0 || pRip == IntPtr.Zero) {
-                throw new COMException("QueryInterface IWMPCdromRip hr=0x" + hr.ToString("X8"), hr);
+            IntPtr pUnkColl = Marshal.GetIUnknownForObject(cdromCollection);
+            IntPtr pColl = IntPtr.Zero;
+            Guid g1 = iidColl;
+            int hr1 = Marshal.QueryInterface(pUnkColl, ref g1, out pColl);
+            Marshal.Release(pUnkColl);
+            if (hr1 != 0 || pColl == IntPtr.Zero) {
+                throw new COMException("QI IWMPCdromCollection hr=0x" + hr1.ToString("X8"), hr1);
             }
+
+            IntPtr vtblColl = Marshal.ReadIntPtr(pColl);
+            FnGetByDrive fnGetBy = (FnGetByDrive)Marshal.GetDelegateForFunctionPointer(
+                Marshal.ReadIntPtr(vtblColl, slotGetBy * IntPtr.Size), typeof(FnGetByDrive));
+            IntPtr pCdrom = IntPtr.Zero;
+            fnGetBy(pColl, driveSpecifier, out pCdrom);
+            Marshal.Release(pColl);
+            if (pCdrom == IntPtr.Zero) {
+                throw new Exception("getByDriveSpecifier n a retourne aucun lecteur pour " + driveSpecifier);
+            }
+            Log(logFile, "Lecteur obtenu via vtable brute (aucun late-binding parametre).");
+
+            IntPtr pRip = IntPtr.Zero;
+            Guid g2 = iidRip;
+            int hr2 = Marshal.QueryInterface(pCdrom, ref g2, out pRip);
+            Marshal.Release(pCdrom);
+            if (hr2 != 0 || pRip == IntPtr.Zero) {
+                throw new COMException("QI IWMPCdromRip hr=0x" + hr2.ToString("X8"), hr2);
+            }
+
             IntPtr vtbl = Marshal.ReadIntPtr(pRip);
             FnVoid fnStart = (FnVoid)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotStart * IntPtr.Size), typeof(FnVoid));
             FnVoid fnStop = (FnVoid)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotStop * IntPtr.Size), typeof(FnVoid));
@@ -505,7 +544,7 @@ namespace CdRepo {
     }
 }
 '@
-        Write-ModuleTrace 'Rip audio : binder compile.'
+        Write-ModuleTrace 'Rip audio : binder v2 compile.'
     }
 }
 
@@ -523,7 +562,7 @@ function Invoke-CdAudioRipInternal {
     if (-not $logFile) { $logFile = Join-Path $env:TEMP 'CdRepositoryJob.log' }
     $wmpPath = Get-WmpDllPath
     Write-ModuleTrace "Rip audio : typelib source : $wmpPath"
-    Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
+    Write-ModuleTrace 'Rip audio : creation de l objet COM (propriete seulement, les appels parametres passent par la vtable).'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
     Write-ModuleTrace 'Rip audio : objet WMP cree.'
     $script:RipResult = $null
@@ -531,28 +570,15 @@ function Invoke-CdAudioRipInternal {
     try {
         $cdroms = $wmp.cdromCollection
         if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
-        Write-ModuleTrace "Rip audio : getByDriveSpecifier('${drive}:')..."
-        $cdrom = $null
-        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
-        if (-not $cdrom) {
-            Write-ModuleTrace 'Rip audio : enumeration de la collection...'
-            for ($k = 0; $k -lt $cdroms.count; $k++) {
-                $c = $cdroms.Item($k)
-                if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
-            }
-        }
-        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
-        Write-ModuleTrace 'Rip audio : lecteur trouve. Lecture de la playlist...'
-        $trackCount = 0
-        try { $trackCount = $cdrom.Playlist.count } catch { Write-ModuleTrace "Rip audio : playlist a echoue : $($_.Exception.Message)" }
-        if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
-        Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
-        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Extraction..." }
+        $driveCount = 0
+        try { $driveCount = $cdroms.count } catch { }
+        Write-ModuleTrace "Rip audio : $driveCount lecteur(s) dans la collection."
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte dans ${drive}:. Extraction..." }
 
         $ripStart = Get-Date
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-        $script:RipRaw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
-        Write-ModuleTrace 'Rip audio : binder vtable operationnel (slots typelib, details [WMPRAW]).'
+        $script:RipRaw = [CdRepo.WmpRaw]::BindByDrive($cdroms, "${drive}:", $wmpPath, $logFile)
+        Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW]).'
 
         $form = New-Object System.Windows.Forms.Form
         $form.WindowState = 'Minimized'
@@ -591,7 +617,7 @@ function Invoke-CdAudioRipInternal {
 
         $form.Add_Shown({
             try {
-                Write-ModuleTrace 'Rip audio : pompe active, appel de startRip (slot typelib)...'
+                Write-ModuleTrace 'Rip audio : pompe active, appel de startRip (vtable)...'
                 $script:RipRaw.StartRip()
                 Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
                 $timer.Start()
