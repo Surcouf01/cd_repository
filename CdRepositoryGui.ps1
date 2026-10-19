@@ -21,25 +21,35 @@ $script:LogFile = Join-Path $here 'CdRepositoryGui.log'
 
 function Write-ErrorLog {
     param([string]$Context, [object]$Error)
-    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Context]"
-    if ($Error -is [System.Management.Automation.ErrorRecord]) {
-        $line += " $($Error.Exception.GetType().FullName): $($Error.Exception.Message)"
-        if ($Error.InvocationInfo) {
-            $line += "`n    at $($Error.InvocationInfo.PositionMessage)"
+    try {
+        $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [$Context]"
+        if ($Error -is [System.Management.Automation.ErrorRecord]) {
+            $line += " $($Error.Exception.GetType().FullName): $($Error.Exception.Message)"
+            if ($Error.InvocationInfo) {
+                $line += "`n    at $($Error.InvocationInfo.PositionMessage)"
+            }
+            if ($Error.Exception.InnerException) {
+                $line += "`n    inner: $($Error.Exception.InnerException.Message)"
+            }
         }
-        if ($Error.Exception.InnerException) {
-            $line += "`n    inner: $($Error.Exception.InnerException.Message)"
-        }
-    }
-    else { $line += " $Error" }
-    Write-TraceLog -Message $line -Color 'Yellow'
+        else { $line += " $Error" }
+        Write-TraceLog -Message $line -Color 'Yellow'
+    } catch { }
 }
 
 function Write-TraceLog {
     param([string]$Message, [string]$Color = 'DarkGray')
     try { Add-Content -Path $script:LogFile -Value $Message -Encoding UTF8 } catch { }
-    Write-Host $Message -ForegroundColor $Color
+    try { Add-Content -Path (Join-Path $env:TEMP 'CdRepositoryGui.log') -Value $Message -Encoding UTF8 } catch { }
+    try { Write-Host $Message -ForegroundColor $Color } catch { }
 }
+
+try {
+    [AppDomain]::CurrentDomain.add_UnhandledException({
+        param($sender, $e)
+        try { Write-TraceLog "[APPDOMAIN] Exception non geree : $($e.ExceptionObject)" -Color 'Red' } catch { }
+    })
+} catch { }
 
 Write-TraceLog "=== Demarrage du GUI -VerboseErrors=$script:VerboseErrors ===" -Color 'Cyan'
 
@@ -691,6 +701,7 @@ $controls['BtnRip'].Add_Click({
     $script:CopyTimer = $timer
     $timer.Add_Tick({
         if ($script:CopyDone) { $script:CopyTimer.Stop(); return }
+        try {
 
         if ($script:JobLogPath -and (Test-Path $script:JobLogPath)) {
             try {
@@ -764,6 +775,10 @@ $controls['BtnRip'].Add_Click({
                     'Copie interrompue', 'OK', 'Warning') | Out-Null
                 Update-DiskGrid
             }
+        }
+        }
+        catch {
+            Write-ErrorLog -Context 'COPY-TIMER' -Error $_
         }
     })
     $timer.Start()
