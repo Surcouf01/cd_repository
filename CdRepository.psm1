@@ -387,97 +387,60 @@ function Invoke-CdAudioRip {
         [int]$TimeoutMinutes = 90
     )
     $drive = $DriveLetter.TrimEnd('\',':')
-    Write-ModuleTrace 'Rip audio : compilation de l interop WMP si necessaire...'
-    if (-not ('CdRepo.WmpRip' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-
-namespace CdRepo {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct WmpRipResult {
-        public int Percent;
-        public int State;
-    }
-
-    [ComImport]
-    [Guid("6BF52A4F-394A-11D3-B153-00C04F79FAA6")]
-    public class WindowsMediaPlayerClass { }
-
-    [ComImport]
-    [Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C")]
-    [InterfaceType(ComInterfaceType.InterfaceIsDual)]
-    public interface IWMPCdromRip {
-        void startRip();
-        void stopRip();
-        void get_ripState(out int pState);
-        void get_ripProgress(out int plProgress);
-    }
-
-    public static class WmpRip {
-        public static void StartRip(object cdrom) {
-            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
-            rip.startRip();
-        }
-        public static void StopRip(object cdrom) {
-            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
-            rip.stopRip();
-        }
-        public static WmpRipResult GetStatus(object cdrom) {
-            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
-            WmpRipResult r;
-            rip.get_ripState(out r.State);
-            rip.get_ripProgress(out r.Percent);
-            return r;
-        }
-    }
-}
-'@
-    }
+    Write-ModuleTrace 'Rip audio : utilisation du late-binding IDispatch (plus d interop C#).'
     Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
     Write-ModuleTrace 'Rip audio : objet WMP cree.'
     try {
         $cdroms = $wmp.cdromCollection
         if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
-        $cdrom = $null
         Write-ModuleTrace "Rip audio : recherche du lecteur ${drive}: dans la collection WMP..."
+        $cdrom = $null
         try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
         if (-not $cdrom) {
             for ($i = 0; $i -lt $cdroms.count; $i++) {
                 $c = $cdroms.Item($i)
-                if ($c -and $c.driveSpecifier -match "^${drive}$") { $cdrom = $c; break }
+                if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
             }
         }
-        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:. Verifiez que le disque est bien insere." }
-        Write-ModuleTrace "Rip audio : lecteur trouve. Lecture de la playlist..."
+        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
+        Write-ModuleTrace 'Rip audio : lecteur trouve. Lecture de la playlist...'
         $playlist = $cdrom.Playlist
-        Write-ModuleTrace "Rip audio : playlist lue."
-        if (-not $playlist -or $playlist.count -eq 0) {
-            throw "Aucune piste audio detectee dans ${drive}: (le disque n'est peut-etre pas un CD audio)."
-        }
-        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $($playlist.count) piste(s). Demarrage du rip..." }
+        Write-ModuleTrace 'Rip audio : playlist lue.'
+        $trackCount = 0
+        try { $trackCount = $playlist.count } catch { }
+        if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
+        Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Demarrage du rip..." }
 
         $ripStart = Get-Date
-        Write-ModuleTrace 'Rip audio : appel de startRip (COM natif)...'
-        [CdRepo.WmpRip]::StartRip($cdrom)
+        Write-ModuleTrace 'Rip audio : appel de startRip (late-binding)...'
+        $null = $cdrom.startRip()
         Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
+
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
         $state = 1
         $poll = 0
-        Write-ModuleTrace "Rip audio : surveillance de la progression (interrogation toutes les secondes, timeout $TimeoutMinutes min)..."
+        $pct = 0
+        Write-ModuleTrace "Rip audio : surveillance (timeout $TimeoutMinutes min)..."
         while ($state -eq 1) {
             Start-Sleep -Milliseconds 1000
             $poll++
-            $st = [CdRepo.WmpRip]::GetStatus($cdrom)
-            $state = $st.State
-            if ($poll % 5 -eq 1) {
-                Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$($st.Percent) %."
+            try {
+                $state = [int]$cdrom.ripState
+                $pct = [int]$cdrom.ripProgress
             }
-            if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $($st.Percent) %)." }
-            if ($ProgressCallback) { & $ProgressCallback $st.Percent ("Extraction audio : $($st.Percent) %") }
+            catch {
+                Write-ModuleTrace "Rip audio : lecture de ripState/ripProgress impossible : $($_.Exception.Message)"
+                $state = 2
+                $pct = 100
+                break
+            }
+            if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
+            if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)." }
+            if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
             if ((Get-Date) -gt $deadline) {
-                [CdRepo.WmpRip]::StopRip($cdrom)
+                try { $null = $cdrom.stopRip() } catch { }
                 throw "Timeout du rip audio apres $TimeoutMinutes minutes."
             }
         }
