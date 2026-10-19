@@ -454,9 +454,9 @@ namespace CdRepo {
 
             IntPtr pAttr;
             ripInfo.GetTypeAttr(out pAttr);
-            TYPEATTR attr = (TYPEATTR)Marshal.PtrToStructure(pAttr, typeof(TYPEATTR));
+            System.Runtime.InteropServices.ComTypes.TYPEATTR attr = (System.Runtime.InteropServices.ComTypes.TYPEATTR)Marshal.PtrToStructure(pAttr, typeof(System.Runtime.InteropServices.ComTypes.TYPEATTR));
             Log(logFile, "typekind=" + attr.typekind + " cFuncs=" + attr.cFuncs + " wTypeFlags=0x" + attr.wTypeFlags.ToString("X"));
-            if (attr.typekind == TYPEKIND.TKIND_DISPATCH) {
+            if (attr.typekind == System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_DISPATCH) {
                 ripInfo.ReleaseTypeAttr(pAttr);
                 throw new Exception("IWMPCdromRip est une dispinterface pure : appel vtable impossible.");
             }
@@ -464,7 +464,7 @@ namespace CdRepo {
             for (int f = 0; f < attr.cFuncs; f++) {
                 IntPtr pFd;
                 ripInfo.GetFuncDesc(f, out pFd);
-                FUNCDESC fd = (FUNCDESC)Marshal.PtrToStructure(pFd, typeof(FUNCDESC));
+                System.Runtime.InteropServices.ComTypes.FUNCDESC fd = (System.Runtime.InteropServices.ComTypes.FUNCDESC)Marshal.PtrToStructure(pFd, typeof(System.Runtime.InteropServices.ComTypes.FUNCDESC));
                 string[] names = new string[fd.cNames + 1];
                 int pcNames;
                 ripInfo.GetNames(fd.memid, names, names.Length, out pcNames);
