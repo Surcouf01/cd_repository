@@ -279,6 +279,8 @@ $controls['BtnRip'].Add_Click({
     $dialog = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
     $dlgLetter = $dialog.FindName('DlgLetter')
     $dlgTitle  = $dialog.FindName('DlgTitle')
+    $dlgOk     = $dialog.FindName('DlgOk')
+    $dlgOk.Add_Click({ $dialog.DialogResult = $true })
 
     $letters = Get-CdDriveLetters
     foreach ($l in $letters) { $dlgLetter.Items.Add($l) | Out-Null }
