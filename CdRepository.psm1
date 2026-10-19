@@ -465,10 +465,10 @@ namespace CdRepo {
                 IntPtr pFd;
                 ripInfo.GetFuncDesc(f, out pFd);
                 System.Runtime.InteropServices.ComTypes.FUNCDESC fd = (System.Runtime.InteropServices.ComTypes.FUNCDESC)Marshal.PtrToStructure(pFd, typeof(System.Runtime.InteropServices.ComTypes.FUNCDESC));
-                string[] names = new string[fd.cNames + 1];
+                string[] names = new string[8];
                 int pcNames;
                 ripInfo.GetNames(fd.memid, names, names.Length, out pcNames);
-                string fname = names[0];
+                string fname = (pcNames > 0 && names[0] != null) ? names[0] : "";
                 int slot = fd.oVft / IntPtr.Size;
                 Log(logFile, "func[" + f + "] " + fname + " slot=" + slot + " invkind=" + fd.invkind);
                 if (fname == "get_ripState") slotState = slot;
