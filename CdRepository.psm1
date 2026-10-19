@@ -407,7 +407,24 @@ namespace CdRepo {
 
     public static class WmpRip {
         public static IWMPCdromRip GetRipInterface(object cdrom) {
-            return (IWMPCdromRip)cdrom;
+            IntPtr pUnknown = Marshal.GetIUnknownForObject(cdrom);
+            try {
+                Guid iidRip = new Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C");
+                IntPtr pRip;
+                int hr = Marshal.QueryInterface(pUnknown, ref iidRip, out pRip);
+                if (hr != 0) {
+                    throw new COMException("QueryInterface IWMPCdromRip a echoue (hr=0x" + hr.ToString("X8") + ")", hr);
+                }
+                try {
+                    return (IWMPCdromRip)Marshal.GetObjectForIUnknown(pRip);
+                }
+                finally {
+                    Marshal.Release(pRip);
+                }
+            }
+            finally {
+                Marshal.Release(pUnknown);
+            }
         }
         public static void StartRip(IWMPCdromRip rip) { rip.startRip(); }
         public static void StopRip(IWMPCdromRip rip) { rip.stopRip(); }
