@@ -18,6 +18,8 @@ if (-not $LogFile) {
     $LogFile = Join-Path $env:TEMP 'CdRepositoryJob.log'
 }
 
+$env:CdRepoLogFile = $LogFile
+
 function Write-JobTrace {
     param([string]$Message)
     $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [JOB] $Message"

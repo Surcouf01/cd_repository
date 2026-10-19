@@ -557,6 +557,19 @@ $controls['BtnRip'].Add_Click({
     if ($letters.Count -gt 0) {
         $dlgLetter.SelectedIndex = 0
         $dlgTitle.Focus()
+        $sel0 = $dlgLetter.Text.Trim().TrimEnd(':', '\')
+        if ($sel0) {
+            $vol0 = Get-Volume -DriveLetter $sel0 -ErrorAction SilentlyContinue
+            if ($vol0 -and $vol0.FileSystemLabel) {
+                $dlgLabel.Text = "Titre du disque : $($vol0.FileSystemLabel)"
+            }
+            elseif ($vol0) {
+                $dlgLabel.Text = "Titre du disque : (CD audio ou disque sans nom)"
+            }
+            else {
+                $dlgLabel.Text = "Titre du disque : (aucun disque dans ${sel0}:)"
+            }
+        }
     } else {
         $dlgLetter.Text = ''
         $dlgLetter.Focus()
