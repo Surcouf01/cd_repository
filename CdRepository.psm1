@@ -512,8 +512,21 @@ function Copy-CdToRepository {
     $drive = $DriveLetter.TrimEnd('\',':')
     $src = "${drive}:"
     Write-ModuleTrace "Copy-CdToRepository : demarrage (lecteur=$drive titre=$Title categorie=$Category)."
-    Write-ModuleTrace "Copy-CdToRepository : Get-Volume..."
-    $vol = (Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue)
+    Write-ModuleTrace "Copy-CdToRepository : interrogation du lecteur (DriveInfo)..."
+    $vol = $null
+    try {
+        $di = New-Object System.IO.DriveInfo("$drive")
+        if ($di.IsReady) {
+            $vol = [pscustomobject]@{ FileSystemLabel = $di.VolumeLabel }
+            Write-ModuleTrace "Copy-CdToRepository : lecteur pret, label='$($di.VolumeLabel)' format='$($di.DriveFormat)'."
+        }
+        else {
+            Write-ModuleTrace "Copy-CdToRepository : lecteur pas pret (pas de medium)."
+        }
+    }
+    catch {
+        Write-ModuleTrace "Copy-CdToRepository : DriveInfo a echoue : $($_.Exception.Message)"
+    }
     Write-ModuleTrace "Copy-CdToRepository : Get-PSDrive..."
     $hasFileSystem = [bool](Get-PSDrive $drive -ErrorAction SilentlyContinue)
     Write-ModuleTrace "Copy-CdToRepository : systeme de fichiers present = $hasFileSystem."

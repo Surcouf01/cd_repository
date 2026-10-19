@@ -374,6 +374,15 @@ function Update-ContentPane {
     }
 }
 
+function Get-CdVolumeLabel {
+    param([string]$Drive)
+    try {
+        $di = New-Object System.IO.DriveInfo("$($Drive.TrimEnd(':', '\'))")
+        if ($di.IsReady) { return "$($di.VolumeLabel)" }
+    } catch { }
+    return ''
+}
+
 function Get-CdDriveLetters {
     $letters = @()
     try {
@@ -534,7 +543,9 @@ $controls['BtnRip'].Add_Click({
     $dlgLetter.Add_SelectionChanged({
         $sel = $dlgLetter.Text.Trim().TrimEnd(':', '\')
         if (-not $sel) { $dlgLabel.Text = ''; return }
-        $vol = Get-Volume -DriveLetter $sel -ErrorAction SilentlyContinue
+        $vol = $null
+        $lbl = Get-CdVolumeLabel -Drive $sel
+        if ($lbl) { $vol = [pscustomobject]@{ FileSystemLabel = $lbl } }
         if ($vol -and $vol.FileSystemLabel) {
             $dlgLabel.Text = "Titre du disque : $($vol.FileSystemLabel)"
         }
@@ -559,7 +570,9 @@ $controls['BtnRip'].Add_Click({
         $dlgTitle.Focus()
         $sel0 = $dlgLetter.Text.Trim().TrimEnd(':', '\')
         if ($sel0) {
-            $vol0 = Get-Volume -DriveLetter $sel0 -ErrorAction SilentlyContinue
+            $vol0 = $null
+            $lbl0 = Get-CdVolumeLabel -Drive $sel0
+            if ($lbl0) { $vol0 = [pscustomobject]@{ FileSystemLabel = $lbl0 } }
             if ($vol0 -and $vol0.FileSystemLabel) {
                 $dlgLabel.Text = "Titre du disque : $($vol0.FileSystemLabel)"
             }
@@ -597,7 +610,9 @@ $controls['BtnRip'].Add_Click({
             $rootFiles = @(Get-ChildItem -LiteralPath "$($letter.TrimEnd(':', '\')):" -File -ErrorAction SilentlyContinue | Select-Object -First 5)
             $cdaCount = @($rootFiles | Where-Object { $_.Extension -eq '.cda' }).Count
             if ($rootFiles.Count -gt 0 -and $cdaCount -eq $rootFiles.Count) { $isAudio = $true }
-            $volTmp = Get-Volume -DriveLetter $letter.TrimEnd(':', '\') -ErrorAction SilentlyContinue
+            $volTmp = $null
+            $lblT = Get-CdVolumeLabel -Drive $letter
+            if ($lblT) { $volTmp = [pscustomobject]@{ FileSystemLabel = $lblT } }
             if ($volTmp -and "$($volTmp.FileSystemLabel)" -match 'Audio CD') { $isAudio = $true }
         } catch { }
     }
