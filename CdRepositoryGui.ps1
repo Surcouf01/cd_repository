@@ -660,6 +660,9 @@ $controls['BtnRip'].Add_Click({
     Copy-Item -LiteralPath $jobScript -Destination $localJob -Force
     Copy-Item -LiteralPath $modulePath -Destination $localMod -Force
     Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psm1') -Destination $localPsm -Force
+    if (Test-Path (Join-Path $here 'Rip-CdJob.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $here 'Rip-CdJob.ps1') -Destination (Join-Path $localDir 'Rip-CdJob.ps1') -Force
+    }
     if (Test-Path (Join-Path $here 'config.json')) {
         Copy-Item -LiteralPath (Join-Path $here 'config.json') -Destination $localCfg -Force
     }

@@ -1,7 +1,9 @@
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
 
-$script:CfgFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'config.json'
+$script:ModuleRoot = $PSScriptRoot
+if (-not $script:ModuleRoot) { $script:ModuleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$script:CfgFile = Join-Path $script:ModuleRoot 'config.json'
 $script:TraceFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'CdRepositoryGui.log'
 
 function Write-ModuleTrace {
@@ -631,7 +633,7 @@ function Invoke-CdAudioRip {
     $drive = $DriveLetter.TrimEnd('\',':')
     Write-ModuleTrace 'Rip audio : delegation a un sous-processus 32 bits dedie (controle ActiveX WMP 32 bits uniquement).'
 
-    $ripJob = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'Rip-CdJob.ps1'
+    $ripJob = Join-Path $script:ModuleRoot 'Rip-CdJob.ps1'
     if (-not (Test-Path $ripJob)) { throw "Rip-CdJob.ps1 introuvable : $ripJob" }
 
     $dir = Join-Path $env:TEMP 'cdrepo_job'
