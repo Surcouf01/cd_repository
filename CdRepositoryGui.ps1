@@ -555,12 +555,18 @@ $controls['BtnRip'].Add_Click({
     $script:CopyProgressPos = 0
     $script:CopyDone = $false
 
-    $procArgs = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', $jobScript,
-                  '-ModulePath', $modulePath,
-                  '-DriveLetter', $letter,
-                  '-Title', $title,
-                  '-Category', $cat,
-                  '-ProgressFile', $progressFile)
+    function Quote-Arg([string]$v) {
+        if ($null -eq $v) { return '""' }
+        return '"' + $v + '"'
+    }
+    $procArgs = @(
+        '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', (Quote-Arg $jobScript),
+        '-ModulePath', (Quote-Arg $modulePath),
+        '-DriveLetter', (Quote-Arg $letter),
+        '-Title', (Quote-Arg $title),
+        '-Category', (Quote-Arg $cat),
+        '-ProgressFile', (Quote-Arg $progressFile)
+    )
     Write-TraceLog "[GUI] Lancement du processus isole : powershell $($procArgs -join ' ')" -Color 'Cyan'
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $procArgs -PassThru -WindowStyle Hidden
     $script:CopyProc = $proc
