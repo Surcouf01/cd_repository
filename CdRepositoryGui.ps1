@@ -32,11 +32,16 @@ function Write-ErrorLog {
         }
     }
     else { $line += " $Error" }
-    try { Add-Content -Path $script:LogFile -Value $line -Encoding UTF8 } catch { }
-    if ($script:VerboseErrors) {
-        Write-Host $line -ForegroundColor Yellow
-    }
+    Write-TraceLog -Message $line -Color 'Yellow'
 }
+
+function Write-TraceLog {
+    param([string]$Message, [string]$Color = 'DarkGray')
+    try { Add-Content -Path $script:LogFile -Value $Message -Encoding UTF8 } catch { }
+    Write-Host $Message -ForegroundColor $Color
+}
+
+Write-TraceLog "=== Demarrage du GUI -VerboseErrors=$script:VerboseErrors ===" -Color 'Cyan'
 
 if ($script:VerboseErrors) { $ErrorActionPreference = 'Continue'; $Error.Clear() }
 
@@ -537,6 +542,7 @@ $controls['BtnRip'].Add_Click({
 
     Show-CopyOverlay -Title $title -SourceLetter $letter
 
+    Write-TraceLog "[GUI] Copie demandee : lecteur='$letter' titre='$title' categorie='$cat'" -Color 'Cyan'
     $modulePath = Join-Path $here 'CdRepository.psd1'
     $ps = [powershell]::Create().AddScript({
         param($mod, $letter, $title, $cat, $uiHash)

@@ -2,6 +2,12 @@
 Set-StrictMode -Version Latest
 
 $script:CfgFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'config.json'
+$script:TraceFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'CdRepositoryGui.log'
+
+function Write-ModuleTrace {
+    param([string]$Message)
+    try { Add-Content -Path $script:TraceFile -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [MODULE] $Message" -Encoding UTF8 } catch { }
+}
 $script:IndexFile = $null
 $script:Categories = @('jeux','peripheriques','films','musique','autre')
 
@@ -173,6 +179,7 @@ function Test-CdIsAudio {
     param([Parameter(Mandatory)][string]$DriveLetter)
     $drive = $DriveLetter.TrimEnd('\',':')
     try {
+        Write-ModuleTrace "Test-CdIsAudio : interrogation Shell du lecteur $drive..."
         $shell = New-Object -ComObject Shell.Application
         $folder = $shell.NameSpace(3)  # ssfDRIVES
         if (-not $folder) { return $false }
@@ -226,6 +233,7 @@ function Invoke-CdAudioRip {
         [int]$TimeoutMinutes = 90
     )
     $drive = $DriveLetter.TrimEnd('\',':')
+    Write-ModuleTrace 'Rip audio : compilation de l interop WMP si necessaire...'
     if (-not ('CdRepo.WmpRip' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -276,12 +284,15 @@ namespace CdRepo {
         -not (Test-Path "${env:ProgramFiles(x86)}\Windows Media Player\wmp.dll")) {
         throw "Windows Media Player est requis pour le rip audio (wmp.dll introuvable)."
     }
+    Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
+    Write-ModuleTrace 'Rip audio : objet WMP cree.'
     try {
         $cdroms = $wmp.cdromCollection
         if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
         $cdrom = $null
-        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
+        Write-ModuleTrace "Rip audio : recherche du lecteur ${drive}: dans la collection WMP..."
+        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
         if (-not $cdrom) {
             for ($i = 0; $i -lt $cdroms.count; $i++) {
                 $c = $cdroms.Item($i)
@@ -289,20 +300,25 @@ namespace CdRepo {
             }
         }
         if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:. Verifiez que le disque est bien insere." }
+        Write-ModuleTrace "Rip audio : lecteur trouve. Lecture de la playlist..."
         $playlist = $cdrom.Playlist
+        Write-ModuleTrace "Rip audio : playlist lue."
         if (-not $playlist -or $playlist.count -eq 0) {
             throw "Aucune piste audio detectee dans ${drive}: (le disque n'est peut-etre pas un CD audio)."
         }
         if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $($playlist.count) piste(s). Demarrage du rip..." }
 
         $ripStart = Get-Date
+        Write-ModuleTrace 'Rip audio : appel de startRip (COM natif)...'
         [CdRepo.WmpRip]::StartRip($cdrom)
+        Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
         $state = 1
         while ($state -eq 1) {
             Start-Sleep -Milliseconds 1000
             $st = [CdRepo.WmpRip]::GetStatus($cdrom)
             $state = $st.State
+            if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $($st.Percent) %)." }
             if ($ProgressCallback) { & $ProgressCallback $st.Percent ("Extraction audio : $($st.Percent) %") }
             if ((Get-Date) -gt $deadline) {
                 [CdRepo.WmpRip]::StopRip($cdrom)
@@ -313,7 +329,9 @@ namespace CdRepo {
             throw "Le rip audio s est termine de facon inattendue (etat $state)."
         }
         if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
+        Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
         $ripped = Get-RippedFiles -Since $ripStart
+        Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
         if ($ripped.Count -eq 0) {
             throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
         }
