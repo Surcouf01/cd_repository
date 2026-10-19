@@ -525,7 +525,7 @@ $controls['BtnRip'].Add_Click({
             $dlgLabel.Text = "Titre du disque : (CD audio ou disque sans nom)"
         }
         else {
-            $dlgLabel.Text = "Titre du disque : (aucun disque dans $sel:)"
+            $dlgLabel.Text = "Titre du disque : (aucun disque dans ${sel}:)"
         }
     })
     $dlgOk.Add_Click({ $dialog.DialogResult = $true })
