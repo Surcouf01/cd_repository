@@ -406,7 +406,7 @@ namespace CdRepo {
     }
 
     public static class WmpRip {
-        public static IWMPCdromRip GetRipInterface(object cdrom) {
+        private static IWMPCdromRip GetRip(object cdrom) {
             IntPtr pUnknown = Marshal.GetIUnknownForObject(cdrom);
             try {
                 Guid iidRip = new Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C");
@@ -416,7 +416,8 @@ namespace CdRepo {
                     throw new COMException("QueryInterface IWMPCdromRip a echoue (hr=0x" + hr.ToString("X8") + ")", hr);
                 }
                 try {
-                    return (IWMPCdromRip)Marshal.GetObjectForIUnknown(pRip);
+                    IWMPCdromRip rip = (IWMPCdromRip)Marshal.GetObjectForIUnknown(pRip);
+                    return rip;
                 }
                 finally {
                     Marshal.Release(pRip);
@@ -426,9 +427,16 @@ namespace CdRepo {
                 Marshal.Release(pUnknown);
             }
         }
-        public static void StartRip(IWMPCdromRip rip) { rip.startRip(); }
-        public static void StopRip(IWMPCdromRip rip) { rip.stopRip(); }
-        public static WmpRipResult GetStatus(IWMPCdromRip rip) {
+        public static void StartRip(object cdrom) {
+            IWMPCdromRip rip = GetRip(cdrom);
+            rip.startRip();
+        }
+        public static void StopRip(object cdrom) {
+            IWMPCdromRip rip = GetRip(cdrom);
+            rip.stopRip();
+        }
+        public static WmpRipResult GetStatus(object cdrom) {
+            IWMPCdromRip rip = GetRip(cdrom);
             WmpRipResult r;
             rip.get_ripState(out r.State);
             rip.get_ripProgress(out r.Percent);
@@ -473,14 +481,10 @@ function Invoke-CdAudioRip {
         if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
         Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
 
-        Write-ModuleTrace 'Rip audio : cast QueryInterface vers IWMPCdromRip (vtable corrigee)...'
-        $rip = [CdRepo.WmpRip]::GetRipInterface($cdrom)
-        Write-ModuleTrace 'Rip audio : interface IWMPCdromRip obtenue.'
-
         if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Demarrage du rip..." }
         $ripStart = Get-Date
-        Write-ModuleTrace 'Rip audio : appel de startRip...'
-        [CdRepo.WmpRip]::StartRip($rip)
+        Write-ModuleTrace 'Rip audio : appel de startRip (QI fait en C#)...'
+        [CdRepo.WmpRip]::StartRip($cdrom)
         Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
 
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -491,14 +495,14 @@ function Invoke-CdAudioRip {
         while ($state -eq 1) {
             Start-Sleep -Milliseconds 1000
             $poll++
-            $st = [CdRepo.WmpRip]::GetStatus($rip)
+            $st = [CdRepo.WmpRip]::GetStatus($cdrom)
             $state = $st.State
             $pct = $st.Percent
             if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
             if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)." }
             if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
             if ((Get-Date) -gt $deadline) {
-                try { [CdRepo.WmpRip]::StopRip($rip) } catch { }
+                try { [CdRepo.WmpRip]::StopRip($cdrom) } catch { }
                 throw "Timeout du rip audio apres $TimeoutMinutes minutes."
             }
         }
