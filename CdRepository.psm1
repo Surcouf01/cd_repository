@@ -406,8 +406,18 @@ function Get-WmpDllPath {
 function New-WmpRipRaw {
     [CmdletBinding()]
     param()
+    $binderDir = Join-Path $env:TEMP 'cdrepo_job'
+    if (-not (Test-Path $binderDir)) { New-Item -ItemType Directory -Path $binderDir -Force | Out-Null }
+    $binderDll = Join-Path $binderDir 'CdRepo.WmpRaw.dll'
+    if (Test-Path $binderDll) {
+        try {
+            $null = [Reflection.Assembly]::LoadFrom($binderDll)
+            Write-ModuleTrace 'Rip audio : binder pre-compile charge depuis la DLL.'
+            return
+        } catch { Write-ModuleTrace "Rip audio : chargement de la DLL binder a echoue, recompilation : $($_.Exception.Message)" }
+    }
     if (-not ('CdRepo.WmpRaw' -as [type])) {
-        Write-ModuleTrace 'Rip audio : compilation du binder typelib v2 (collection + rip, zero GUID en dur)...'
+        Write-ModuleTrace 'Rip audio : compilation du binder typelib v2 vers DLL persistante...'
         Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -548,8 +558,9 @@ namespace CdRepo {
         }
     }
 }
-'@
-        Write-ModuleTrace 'Rip audio : binder v2 compile.'
+'@ -OutputAssembly $binderDll -CompilerOptions '/platform:AnyCPU'
+        $null = [Reflection.Assembly]::LoadFrom($binderDll)
+        Write-ModuleTrace 'Rip audio : binder v2 compile vers $binderDll et charge.'
     }
 }
 
