@@ -471,10 +471,12 @@ namespace CdRepo {
                 string fname = (pcNames > 0 && names[0] != null) ? names[0] : "";
                 int slot = fd.oVft / IntPtr.Size;
                 Log(logFile, "func[" + f + "] " + fname + " slot=" + slot + " invkind=" + fd.invkind);
-                if (fname == "get_ripState") slotState = slot;
-                else if (fname == "get_ripProgress") slotProg = slot;
-                else if (fname == "startRip") slotStart = slot;
-                else if (fname == "stopRip") slotStop = slot;
+                string baseName = fname;
+                if (baseName.StartsWith("get_")) { baseName = baseName.Substring(4); }
+                if (baseName == "ripState") slotState = slot;
+                else if (baseName == "ripProgress") slotProg = slot;
+                else if (baseName == "startRip") slotStart = slot;
+                else if (baseName == "stopRip") slotStop = slot;
                 ripInfo.ReleaseFuncDesc(pFd);
             }
             ripInfo.ReleaseTypeAttr(pAttr);
