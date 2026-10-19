@@ -619,4 +619,14 @@ $controls['BtnDelete'].Add_Click({
 })
 
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
-[void]$window.ShowDialog()
+
+$app = New-Object System.Windows.Application
+$window.Add_Loaded({
+    [void]$window.Activate()
+    [void]$window.Focus()
+    [System.Windows.Input.Keyboard]::Focus($window)
+})
+$null = $window.Show()
+[void]$window.Activate()
+[void]$window.Focus()
+[void]$app.Run()
