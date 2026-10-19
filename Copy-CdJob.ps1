@@ -36,6 +36,14 @@ try {
         try { Add-Content -Path $ProgressFile -Value "$pct|$detail" -Encoding UTF8 } catch { }
     }
 
+    Write-JobTrace 'Appel de Copy-CdToRepository...'
+    Write-JobTrace "  - Volume du lecteur ${DriveLetter}: ..."
+    $vol = Get-Volume -DriveLetter $DriveLetter.TrimEnd(':', '\') -ErrorAction SilentlyContinue
+    Write-JobTrace "  - Get-Volume : $(if ($vol) { 'OK (label=' + $vol.FileSystemLabel + ')' } else { 'aucun volume' })"
+    Write-JobTrace "  - Test de presence du systeme de fichiers (Get-PSDrive)..."
+    $hasFs = [bool](Get-PSDrive $DriveLetter.TrimEnd(':', '\') -ErrorAction SilentlyContinue)
+    Write-JobTrace "  - Systeme de fichiers present : $hasFs"
+
     $result = Copy-CdToRepository -Title $Title -DriveLetter $DriveLetter -Category $Category -ProgressCallback $cb
     Write-JobTrace "Job termine OK : $result"
     Add-Content -Path $ProgressFile -Value "DONE|$result" -Encoding UTF8

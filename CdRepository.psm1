@@ -204,19 +204,37 @@ function Test-CdIsAudio {
     param([Parameter(Mandatory)][string]$DriveLetter)
     $drive = $DriveLetter.TrimEnd('\',':')
     try {
-        Write-ModuleTrace "Test-CdIsAudio : interrogation Shell du lecteur $drive..."
+        Write-ModuleTrace "Test-CdIsAudio : creation Shell.Application..."
         $shell = New-Object -ComObject Shell.Application
+        Write-ModuleTrace "Test-CdIsAudio : NameSpace(3) ssfDRIVES..."
         $folder = $shell.NameSpace(3)  # ssfDRIVES
-        if (-not $folder) { return $false }
+        if (-not $folder) {
+            Write-ModuleTrace "Test-CdIsAudio : NameSpace(3) a retourne null."
+            return $false
+        }
+        Write-ModuleTrace "Test-CdIsAudio : enumeration des items du dossier Lecteurs..."
         $item = $null
         foreach ($it in $folder.Items()) {
-            if ($it.Name -match "^${drive}:" -or $it.Path -match "^${drive}:\\") { $item = $it; break }
+            $itName = "$($it.Name)"
+            $itPath = "$($it.Path)"
+            Write-ModuleTrace "Test-CdIsAudio : item '$itName' chemin '$itPath'"
+            if ($itName -match "^${drive}:" -or $itPath -match "^${drive}:") { $item = $it; break }
         }
-        if (-not $item) { return $false }
+        if (-not $item) {
+            Write-ModuleTrace "Test-CdIsAudio : lecteur $drive non trouve dans les items Shell."
+            return $false
+        }
+        Write-ModuleTrace "Test-CdIsAudio : lecteur trouve, enumeration des verbes..."
         foreach ($ver in $item.Verbs()) {
-            if ($ver.Name -match 'Rip|Extraire|Copier') { return $true }
+            $vn = "$($ver.Name)"
+            Write-ModuleTrace "Test-CdIsAudio : verbe '$vn'"
+            if ($vn -match 'Rip|Extraire|Copier') { return $true }
         }
-    } catch { return $false }
+    } catch {
+        Write-ModuleTrace "Test-CdIsAudio : exception : $($_.Exception.Message)"
+        return $false
+    }
+    Write-ModuleTrace "Test-CdIsAudio : aucun verbe de rip detecte, disque considere non audio."
     return $false
 }
 
@@ -377,12 +395,17 @@ function Copy-CdToRepository {
         [scriptblock]$ProgressCallback,
         [switch]$NoIndex
     )
+    Write-ModuleTrace "Copy-CdToRepository : demarrage (lecteur=$drive titre=$Title categorie=$Category)."
     $cfg = Import-CdConfig
+    Write-ModuleTrace "Copy-CdToRepository : config chargee (racine=$($cfg.RepositoryRoot))."
     $root = $cfg.RepositoryRoot
     $drive = $DriveLetter.TrimEnd('\',':')
     $src = "${drive}:"
+    Write-ModuleTrace "Copy-CdToRepository : Get-Volume..."
     $vol = (Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue)
+    Write-ModuleTrace "Copy-CdToRepository : Get-PSDrive..."
     $hasFileSystem = [bool](Get-PSDrive $drive -ErrorAction SilentlyContinue)
+    Write-ModuleTrace "Copy-CdToRepository : systeme de fichiers present = $hasFileSystem."
     if (-not $hasFileSystem) {
         $isAudio = Test-CdIsAudio -DriveLetter $drive
         if ($isAudio) {
