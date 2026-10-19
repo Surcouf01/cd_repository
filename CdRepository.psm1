@@ -141,6 +141,12 @@ namespace CdRepo {
             }
             if (progress != null) progress(total, total);
         }
+        public static long GetImageSize(object comStream) {
+            IStream image = (IStream)comStream;
+            System.Runtime.InteropServices.ComTypes.STATSTG st;
+            image.Stat(out st, 1);
+            return st.cbSize;
+        }
     }
 }
 '@
@@ -151,17 +157,36 @@ namespace CdRepo {
         $cbBlock = {
             param([long]$pos, [long]$total)
             if ($total -gt 0) {
-                $p = 70 + [int](30 * $pos / $total)
-                & $userCb $p ("Ecriture de l'ISO : $([math]::Round(100 * $pos / $total)) %")
+                $ratio = [double]$pos / [double]$total
+                if ($ratio -gt 1.0) { $ratio = 1.0 }
+                $p = 70 + [int][math]::Floor(30.0 * $ratio)
+                if ($p -gt 100) { $p = 100 }
+                $pctIso = [int][math]::Floor(100.0 * $ratio)
+                & $userCb $p ("Ecriture de l'ISO : $pctIso %")
             }
         }.GetNewClosure()
         $action = [Action[long,long]]$cbBlock
+    }
+    $srcSizeBytes = 0
+    $srcFiles = @(Get-ChildItem -LiteralPath $SourceDirectory -Recurse -Force -File -ErrorAction SilentlyContinue)
+    if ($srcFiles.Count -gt 0) {
+        $sum = ($srcFiles | Measure-Object Length -Sum).Sum
+        if ($sum) { $srcSizeBytes = [long]$sum }
     }
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
     try {
         $fsi.VolumeName = $VolumeLabel
         $fsi.FileSystemsToCreate = 3   # ISO9660 + Joliet
-        $fsi.ChooseImageDefaultsForMediaType(12)  # CD ~650-700 Mo
+        if ($srcSizeBytes -gt 700MB) {
+            $fsi.ChooseImageDefaultsForMediaType(12)  # base CD
+            try { $fsi.FreeMediaBlocks = 2300000 } catch {
+                try { $fsi.put_FreeMediaBlocks(2300000) } catch { Write-ModuleTrace 'FreeMediaBlocks non modifiable ; taille CD conservee.' }
+            }
+            Write-ModuleTrace "Disque de $([math]::Round($srcSizeBytes/1MB,0)) Mo : capacite etendue a ~2,2 To (FreeMediaBlocks=2300000)."
+        }
+        else {
+            $fsi.ChooseImageDefaultsForMediaType(12)  # CD ~650-700 Mo
+        }
         if ($ProgressCallback) { & $ProgressCallback 72 'Analyse des fichiers pour l image ISO...' }
         $fsi.Root.AddTree((Resolve-Path $SourceDirectory).Path, $false)
         if ($ProgressCallback) { & $ProgressCallback 78 'Generation du flux ISO...' }
@@ -376,9 +401,9 @@ function Copy-CdToRepository {
             if ($totalBytes) { $totalBytes = [long]$totalBytes }
             foreach ($f in $files) {
                 Copy-Item -LiteralPath $f.FullName -Destination $destDir -Force
-                $copied += $f.Length
+                $copied += [long]$f.Length
                 if ($ProgressCallback -and $totalBytes -gt 0) {
-                    & $ProgressCallback ([int](90 * $copied / $totalBytes)) ("Transfert vers le NAS : $($f.Name)")
+                    & $ProgressCallback ([int][math]::Floor(90.0 * $copied / $totalBytes)) ("Transfert vers le NAS : $($f.Name)")
                 }
             }
             if ($files.Count -eq 0) { throw "Le rip audio n a produit aucun fichier. Verifiez le format de sortie de Windows Media Player." }
@@ -454,7 +479,7 @@ function Copy-CdToRepository {
                 catch {
                     if (Test-Path $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue }
                     if ($try -lt 3) {
-                        if ($ProgressCallback) { & $ProgressCallback ([int](70*$copied/[Math]::Max(1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
+                        if ($ProgressCallback) { & $ProgressCallback ([int][math]::Floor(70.0 * $copied / [Math]::Max(1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
                         Start-Sleep -Milliseconds 800
                     }
                 }
@@ -463,11 +488,11 @@ function Copy-CdToRepository {
                 [void]$readErrors.Add([pscustomobject]@{ file = $f.FullName; error = "illisible apres 3 essais" })
                 Write-Warning "Erreur de lecture : $($f.FullName) - fichier ignore"
             } else {
-                $copied += $f.Length
+                $copied += [long]$f.Length
             }
             $n++
             if ($ProgressCallback -and $totalBytes -gt 0) {
-                $pct = [int](70 * $copied / $totalBytes)
+                $pct = [int][math]::Floor(70.0 * $copied / $totalBytes)
                 $suffix = if ($readErrors.Count -gt 0) { " [$($readErrors.Count) erreur(s)]" } else { '' }
                 & $ProgressCallback $pct ("Copie : $($f.Name) ($n/$($allFiles.Count))$suffix")
             }
