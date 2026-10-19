@@ -83,6 +83,8 @@ Remove-CdFromRepository -Id '<guid>'
 
 ## Remarques
 
-- Le rip utilise une copie locale temporaire (rapide depuis un lecteur optique) puis produit une ISO ISO9660+Joliet ; le disque source doit être inséré et lisible (les CD audio « pistes CDDA » et les protections ne sont pas couvertes par IMAPI2 : utilisez un rip dédié type EAC pour la musique, puis `Copy-CdToRepository` ne s'applique pas aux CDDA).
+- Le rip des CD de **données** utilise une copie locale temporaire puis produit une ISO ISO9660+Joliet.
+- **CD audio (CDDA)** : détectés automatiquement (`Test-CdIsAudio`), la copie bascule sur un rip audio via **Windows Media Player** (`Invoke-CdAudioRip`, interface COM `IWMPCdromRip`) : les pistes sont extraites au format configuré dans WMP (par défaut WMA ; configurez MP3 dans WMP → Options → Extraire de la musique), puis transférées dans un sous-dossier `musique/<titre>` du NAS et indexées (entrées avec `sourceLabel = "CD Audio"`). Le bouton Monter ouvre directement le dossier pour ces entrées.
+- Prérequis pour le rip audio : Windows Media Player installé (inclus dans Windows ; fonctionnalité optionnelle sur Windows 11).
 - La gravure n'est pas incluse : clic droit sur l'ISO → *Graver l'image du disque*.
 - L'index (`index\index.json`) est au format JSON et peut aussi être interrogé directement ou par tout autre outil ; il inclut un aperçu des premiers éléments du contenu pour la recherche plein texte.

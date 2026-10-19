@@ -168,6 +168,136 @@ namespace CdRepo {
     }
 }
 
+function Test-CdIsAudio {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$DriveLetter)
+    $drive = $DriveLetter.TrimEnd('\',':')
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $folder = $shell.NameSpace(3)  # ssfDRIVES
+        if (-not $folder) { return $false }
+        $item = $null
+        foreach ($it in $folder.Items()) {
+            if ($it.Name -match "^${drive}:" -or $it.Path -match "^${drive}:\\") { $item = $it; break }
+        }
+        if (-not $item) { return $false }
+        foreach ($ver in $item.Verbs()) {
+            if ($ver.Name -match 'Rip|Extraire|Copier') { return $true }
+        }
+    } catch { return $false }
+    return $false
+}
+
+function Get-WmpRipDestination {
+    [CmdletBinding()]
+    param()
+    $base = Join-Path $env:USERPROFILE 'Music'
+    $sub = Join-Path $base 'Rip CD Repository'
+    if (-not (Test-Path $sub)) { New-Item -ItemType Directory -Path $sub -Force | Out-Null }
+    return $sub
+}
+
+function Invoke-CdAudioRip {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DriveLetter,
+        [scriptblock]$ProgressCallback,
+        [int]$TimeoutMinutes = 90
+    )
+    $drive = $DriveLetter.TrimEnd('\',':')
+    if (-not ('CdRepo.WmpRip' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace CdRepo {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WmpRipResult {
+        public int Percent;
+        public int State;
+    }
+
+    [ComImport]
+    [Guid("6BF52A4F-394A-11D3-B153-00C04F79FAA6")]
+    public class WindowsMediaPlayerClass { }
+
+    [ComImport]
+    [Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IWMPCdromRip {
+        void startRip();
+        void stopRip();
+        void get_ripState(out int pState);
+        void get_ripProgress(out int plProgress);
+    }
+
+    public static class WmpRip {
+        public static void StartRip(object cdrom) {
+            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
+            rip.startRip();
+        }
+        public static void StopRip(object cdrom) {
+            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
+            rip.stopRip();
+        }
+        public static WmpRipResult GetStatus(object cdrom) {
+            IWMPCdromRip rip = (IWMPCdromRip)cdrom;
+            WmpRipResult r;
+            rip.get_ripState(out r.State);
+            rip.get_ripProgress(out r.Percent);
+            return r;
+        }
+    }
+}
+'@
+    }
+    if (-not (Test-Path "$env:ProgramFiles\Windows Media Player\wmp.dll") -and
+        -not (Test-Path "${env:ProgramFiles(x86)}\Windows Media Player\wmp.dll")) {
+        throw "Windows Media Player est requis pour le rip audio (wmp.dll introuvable)."
+    }
+    $wmp = New-Object -ComObject WMPlayer.OCX.7
+    try {
+        $cdroms = $wmp.cdromCollection
+        if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
+        $cdrom = $null
+        try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { }
+        if (-not $cdrom) {
+            for ($i = 0; $i -lt $cdroms.count; $i++) {
+                $c = $cdroms.Item($i)
+                if ($c -and $c.driveSpecifier -match "^${drive}$") { $cdrom = $c; break }
+            }
+        }
+        if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:. Verifiez que le disque est bien insere." }
+        $playlist = $cdrom.Playlist
+        if (-not $playlist -or $playlist.count -eq 0) {
+            throw "Aucune piste audio detectee dans ${drive}: (le disque n'est peut-etre pas un CD audio)."
+        }
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $($playlist.count) piste(s). Demarrage du rip..." }
+
+        [CdRepo.WmpRip]::StartRip($cdrom)
+        $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+        $state = 1
+        while ($state -eq 1) {
+            Start-Sleep -Milliseconds 1000
+            $st = [CdRepo.WmpRip]::GetStatus($cdrom)
+            $state = $st.State
+            if ($ProgressCallback) { & $ProgressCallback $st.Percent ("Extraction audio : $($st.Percent) %") }
+            if ((Get-Date) -gt $deadline) {
+                [CdRepo.WmpRip]::StopRip($cdrom)
+                throw "Timeout du rip audio apres $TimeoutMinutes minutes."
+            }
+        }
+        if ($state -ne 2) {
+            throw "Le rip audio s est termine de facon inattendue (etat $state)."
+        }
+        if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
+        return (Get-WmpRipDestination)
+    }
+    finally {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wmp)
+    }
+}
+
 function Copy-CdToRepository {
     [CmdletBinding()]
     param(
@@ -183,10 +313,62 @@ function Copy-CdToRepository {
     $drive = $DriveLetter.TrimEnd('\',':')
     $src = "${drive}:"
     $vol = (Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue)
-    if (-not $vol) { throw "Lettre de lecteur invalide ou non presente : $drive" }
-    if (-not (Get-PSDrive $drive -ErrorAction SilentlyContinue)) {
-        throw "Aucun disque present dans le lecteur $drive. Si c'est un CD AUDIO (pistes CDDA), il n'a pas de systeme de fichiers : utilisez un ripper dedie (ex. Exact Audio Copy) puis importez les fichiers resultant."
+    $hasFileSystem = [bool](Get-PSDrive $drive -ErrorAction SilentlyContinue)
+    if (-not $hasFileSystem) {
+        $isAudio = Test-CdIsAudio -DriveLetter $drive
+        if ($isAudio) {
+            if ($ProgressCallback) { & $ProgressCallback 0 'CD audio detecte : extraction des pistes...' }
+            $ripDir = Invoke-CdAudioRip -DriveLetter $drive -ProgressCallback $ProgressCallback
+            $catDir = Join-Path $root (Get-MediaCategory $Category)
+            if (-not (Test-Path $catDir)) { New-Item -ItemType Directory -Path $catDir -Force | Out-Null }
+            $safe = ($Title -replace '[\\/:*?"<>|]','_').Trim()
+            $destDir = Join-Path $catDir $safe
+            $i = 1
+            while (Test-Path $destDir) { $destDir = Join-Path $catDir ("{0}_{1}" -f $safe, $i); $i++ }
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            $copied = 0
+            $files = @(Get-ChildItem -LiteralPath $ripDir -Recurse -File -ErrorAction SilentlyContinue)
+            $totalBytes = ($files | Measure-Object Length -Sum).Sum
+            if ($totalBytes) { $totalBytes = [long]$totalBytes }
+            foreach ($f in $files) {
+                Copy-Item -LiteralPath $f.FullName -Destination $destDir -Force
+                $copied += $f.Length
+                if ($ProgressCallback -and $totalBytes -gt 0) {
+                    & $ProgressCallback ([int](90 * $copied / $totalBytes)) ("Transfert vers le NAS : $($f.Name)")
+                }
+            }
+            if ($files.Count -eq 0) { throw "Le rip audio n a produit aucun fichier dans $ripDir. Verifiez le format de sortie de Windows Media Player." }
+            $totalSize = ($files | Measure-Object Length -Sum).Sum
+            New-CdIndex | Out-Null
+            $index = Get-CdIndex
+            $contents = @($files | Select-Object -First 30 | ForEach-Object { $_.Name })
+            $contents += "[$($files.Count) fichiers au total, $([math]::Round($totalSize/1MB,1)) Mo]"
+            $entry = [pscustomobject]@{
+                id          = [guid]::NewGuid().ToString()
+                title       = $Title
+                description = $Description
+                category    = (Get-MediaCategory $Category)
+                fileName    = $safe
+                sizeBytes   = $totalSize
+                addedUtc    = (Get-Date).ToUniversalTime().ToString('o')
+                sourceLabel = "CD Audio"
+                contents    = $contents
+                readErrors  = @()
+            }
+            $newDisks = @($index.disks) + @($entry)
+            Save-CdIndex -Index ([pscustomobject]@{ version = 1; disks = $newDisks })
+            $check = Get-CdIndex
+            if (@($check.disks | Where-Object { $_.id -eq $entry.id }).Count -eq 0) {
+                throw "Echec de l ecriture de l index : verification post-ecriture negative."
+            }
+            if ($ProgressCallback) { & $ProgressCallback 100 'Termine.' }
+            Write-Host "OK : CD audio archive dans $destDir"
+            Write-Output $destDir
+            return
+        }
+        throw "Aucun disque present dans le lecteur $drive."
     }
+    if (-not $vol) { throw "Lettre de lecteur invalide ou non presente : $drive" }
 
     $catDir = Join-Path $root (Get-MediaCategory $Category)
     if (-not (Test-Path $catDir)) { New-Item -ItemType Directory -Path $catDir -Force | Out-Null }
@@ -313,7 +495,14 @@ function Mount-CdFromRepository {
     if (-not $entry) { throw "Aucun disque avec l'id '$Id' dans l'index." }
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
-    if (-not (Test-Path $iso)) { throw "Fichier ISO manquant : $iso" }
+    if (-not (Test-Path $iso)) {
+        if ($entry.sourceLabel -eq 'CD Audio' -and (Test-Path $iso -PathType Container)) {
+            Write-Host "CD audio : contenu disponible dans $iso (pas de montage necessaire)."
+            Start-Process "explorer.exe" $iso
+            return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
+        }
+        throw "Fichier ISO manquant : $iso"
+    }
 
     $allowed = $cfg.DriveLetters
     $free = @(Get-DriveLettersInUse -Allowed $allowed)
@@ -525,6 +714,7 @@ function Move-CdEntry {
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
     'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
+    'Test-CdIsAudio','Invoke-CdAudioRip','Get-WmpRipDestination',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
     'Get-CdCategories','Update-CdCategories','Move-CdEntry'
