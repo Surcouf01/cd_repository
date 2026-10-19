@@ -379,73 +379,130 @@ function Get-RippedFiles {
     return @($files | Where-Object { $_.DirectoryName -eq $newestDir -or $files.Count -le 30 })
 }
 
-function Get-WmpInteropAssembly {
+function Get-WmpDllPath {
     [CmdletBinding()]
     param()
-    if (-not ('CdRepo.WmpRip' -as [type])) {
-        Write-ModuleTrace 'Rip audio : compilation de l interop WMP (ordre vtable correct : ripState, ripProgress, startRip, stopRip)...'
+    $server = $null
+    try {
+        $clsid = (Get-ItemProperty -Path 'Registry::HKEY_CLASSES_ROOT\WMPlayer.OCX.7\CLSID' -ErrorAction Stop).'(default)'
+        if ($clsid) {
+            $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue).'(default)'
+            if (-not $server) { $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\LocalServer32" -ErrorAction SilentlyContinue).'(default)' }
+            if ($server) { $server = [Environment]::ExpandEnvironmentVariables($server.Trim('"')) }
+        }
+    } catch { }
+    if (-not $server -or -not (Test-Path $server)) { $server = Join-Path $env:SystemRoot 'System32\wmp.dll' }
+    if (-not (Test-Path $server)) { throw "wmp.dll introuvable (registre COM et System32)." }
+    return $server
+}
+
+function New-WmpRipRaw {
+    [CmdletBinding()]
+    param()
+    if (-not ('CdRepo.WmpRaw' -as [type])) {
+        Write-ModuleTrace 'Rip audio : compilation du binder typelib (lecture reelle de la typelib de wmp.dll)...'
         Add-Type -TypeDefinition @'
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace CdRepo {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct WmpRipResult {
-        public int State;
-        public int Percent;
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FnVoid(IntPtr pThis);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    public delegate void FnOutInt(IntPtr pThis, out int value);
+
+    public class WmpRipRaw {
+        private IntPtr _pRip;
+        private FnVoid _fnStart, _fnStop;
+        private FnOutInt _fnState, _fnProg;
+
+        internal WmpRipRaw(IntPtr pRip, FnVoid start, FnVoid stop, FnOutInt state, FnOutInt prog) {
+            _pRip = pRip; _fnStart = start; _fnStop = stop; _fnState = state; _fnProg = prog;
+        }
+        public void StartRip() { _fnStart(_pRip); }
+        public void StopRip() { _fnStop(_pRip); }
+        public int GetState() { int v; _fnState(_pRip, out v); return v; }
+        public int GetProgress() { int v; _fnProg(_pRip, out v); return v; }
+        public void Release() { if (_pRip != IntPtr.Zero) { Marshal.Release(_pRip); _pRip = IntPtr.Zero; } }
     }
 
-    [ComImport]
-    [Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IWMPCdromRip {
-        void get_ripState(out int pState);
-        void get_ripProgress(out int plProgress);
-        void startRip();
-        void stopRip();
-    }
+    public static class WmpRaw {
+        [DllImport("oleaut32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        private static extern void LoadTypeLibEx(string strTypeLibName, int regKind, out ITypeLib typeLib);
 
-    public static class WmpRip {
-        private static IWMPCdromRip GetRip(object cdrom) {
-            IntPtr pUnknown = Marshal.GetIUnknownForObject(cdrom);
-            try {
-                Guid iidRip = new Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C");
-                IntPtr pRip;
-                int hr = Marshal.QueryInterface(pUnknown, ref iidRip, out pRip);
-                if (hr != 0) {
-                    throw new COMException("QueryInterface IWMPCdromRip a echoue (hr=0x" + hr.ToString("X8") + ")", hr);
-                }
-                try {
-                    IWMPCdromRip rip = (IWMPCdromRip)Marshal.GetObjectForIUnknown(pRip);
-                    return rip;
-                }
-                finally {
-                    Marshal.Release(pRip);
-                }
+        private static void Log(string logFile, string msg) {
+            try { File.AppendAllText(logFile, "[" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "] [WMPRAW] " + msg + Environment.NewLine); } catch { }
+        }
+
+        public static WmpRipRaw Bind(object cdrom, string wmpPath, string logFile) {
+            if (IntPtr.Size == 4) {
+                throw new Exception("Architecture 32 bits non supportee pour l appel vtable brut (thiscall).");
             }
-            finally {
-                Marshal.Release(pUnknown);
+            ITypeLib tlb;
+            LoadTypeLibEx(wmpPath, 2, out tlb);
+            int count = tlb.GetTypeInfoCount();
+            Log(logFile, "Typelib chargee : " + count + " types.");
+            ITypeInfo ripInfo = null;
+            for (int i = 0; i < count; i++) {
+                string name, doc, help; int ctx;
+                tlb.GetDocumentation(i, out name, out doc, out ctx, out help);
+                if (name == "IWMPCdromRip") { tlb.GetTypeInfo(i, out ripInfo); Log(logFile, "IWMPCdromRip trouve (index " + i + ")."); break; }
             }
-        }
-        public static void StartRip(object cdrom) {
-            IWMPCdromRip rip = GetRip(cdrom);
-            rip.startRip();
-        }
-        public static void StopRip(object cdrom) {
-            IWMPCdromRip rip = GetRip(cdrom);
-            rip.stopRip();
-        }
-        public static WmpRipResult GetStatus(object cdrom) {
-            IWMPCdromRip rip = GetRip(cdrom);
-            WmpRipResult r;
-            rip.get_ripState(out r.State);
-            rip.get_ripProgress(out r.Percent);
-            return r;
+            if (ripInfo == null) { throw new Exception("IWMPCdromRip absent de la typelib de wmp.dll."); }
+
+            IntPtr pAttr;
+            ripInfo.GetTypeAttr(out pAttr);
+            TYPEATTR attr = (TYPEATTR)Marshal.PtrToStructure(pAttr, typeof(TYPEATTR));
+            Log(logFile, "typekind=" + attr.typekind + " cFuncs=" + attr.cFuncs + " wTypeFlags=0x" + attr.wTypeFlags.ToString("X"));
+            if (attr.typekind == TYPEKIND.TKIND_DISPATCH) {
+                ripInfo.ReleaseTypeAttr(pAttr);
+                throw new Exception("IWMPCdromRip est une dispinterface pure : appel vtable impossible.");
+            }
+            int slotStart = -1, slotStop = -1, slotState = -1, slotProg = -1;
+            for (int f = 0; f < attr.cFuncs; f++) {
+                IntPtr pFd;
+                ripInfo.GetFuncDesc(f, out pFd);
+                FUNCDESC fd = (FUNCDESC)Marshal.PtrToStructure(pFd, typeof(FUNCDESC));
+                string[] names = new string[fd.cNames + 1];
+                int pcNames;
+                ripInfo.GetNames(fd.memid, names, names.Length, out pcNames);
+                string fname = names[0];
+                int slot = fd.oVft / IntPtr.Size;
+                Log(logFile, "func[" + f + "] " + fname + " slot=" + slot + " invkind=" + fd.invkind);
+                if (fname == "get_ripState") slotState = slot;
+                else if (fname == "get_ripProgress") slotProg = slot;
+                else if (fname == "startRip") slotStart = slot;
+                else if (fname == "stopRip") slotStop = slot;
+                ripInfo.ReleaseFuncDesc(pFd);
+            }
+            ripInfo.ReleaseTypeAttr(pAttr);
+            Log(logFile, "slots: startRip=" + slotStart + " stopRip=" + slotStop + " ripState=" + slotState + " ripProgress=" + slotProg);
+            if (slotStart < 0 || slotStop < 0 || slotState < 0 || slotProg < 0) {
+                throw new Exception("Methode(s) du rip introuvable(s) dans la typelib.");
+            }
+
+            Guid iidRip = new Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C");
+            IntPtr pUnk = Marshal.GetIUnknownForObject(cdrom);
+            IntPtr pRip = IntPtr.Zero;
+            int hr = Marshal.QueryInterface(pUnk, ref iidRip, out pRip);
+            Marshal.Release(pUnk);
+            if (hr != 0 || pRip == IntPtr.Zero) {
+                throw new COMException("QueryInterface IWMPCdromRip hr=0x" + hr.ToString("X8"), hr);
+            }
+            IntPtr vtbl = Marshal.ReadIntPtr(pRip);
+            FnVoid fnStart = (FnVoid)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotStart * IntPtr.Size), typeof(FnVoid));
+            FnVoid fnStop = (FnVoid)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotStop * IntPtr.Size), typeof(FnVoid));
+            FnOutInt fnState = (FnOutInt)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotState * IntPtr.Size), typeof(FnOutInt));
+            FnOutInt fnProg = (FnOutInt)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(vtbl, slotProg * IntPtr.Size), typeof(FnOutInt));
+            Log(logFile, "Delegues vtable binds. Rip pret.");
+            return new WmpRipRaw(pRip, fnStart, fnStop, fnState, fnProg);
         }
     }
 }
 '@
-        Write-ModuleTrace 'Rip audio : interop compile.'
+        Write-ModuleTrace 'Rip audio : binder compile.'
     }
 }
 
@@ -457,9 +514,12 @@ function Invoke-CdAudioRip {
         [int]$TimeoutMinutes = 90
     )
     $drive = $DriveLetter.TrimEnd('\',':')
-    Get-WmpInteropAssembly
+    New-WmpRipRaw
     Add-Type -AssemblyName System.Windows.Forms
-    Write-ModuleTrace 'Rip audio : boucle de messages WinForms (pattern requis par le controle ActiveX WMP).'
+    $logFile = $env:CdRepoLogFile
+    if (-not $logFile) { $logFile = Join-Path $env:TEMP 'CdRepositoryJob.log' }
+    $wmpPath = Get-WmpDllPath
+    Write-ModuleTrace "Rip audio : typelib source : $wmpPath"
     Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
     Write-ModuleTrace 'Rip audio : objet WMP cree.'
@@ -486,6 +546,8 @@ function Invoke-CdAudioRip {
 
         $ripStart = Get-Date
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+        $raw = [CdRepo.WmpRaw]::Bind($cdrom, $wmpPath, $logFile)
+        Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW] dans le log).'
 
         $form = New-Object System.Windows.Forms.Form
         $form.WindowState = 'Minimized'
@@ -498,9 +560,8 @@ function Invoke-CdAudioRip {
         $timer.Add_Tick({
             try {
                 $poll++
-                $st = [CdRepo.WmpRip]::GetStatus($cdrom)
-                $state = $st.State
-                $pct = $st.Percent
+                $state = $raw.GetState()
+                $pct = $raw.GetProgress()
                 if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
                 if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
                 if ($state -ne 1) {
@@ -510,7 +571,7 @@ function Invoke-CdAudioRip {
                     $form.Close()
                 }
                 elseif ((Get-Date) -gt $deadline) {
-                    try { [CdRepo.WmpRip]::StopRip($cdrom) } catch { }
+                    try { $raw.StopRip() } catch { }
                     $script:RipError = "Timeout du rip audio apres $TimeoutMinutes minutes."
                     $timer.Stop()
                     $form.Close()
@@ -525,8 +586,8 @@ function Invoke-CdAudioRip {
 
         $form.Add_Shown({
             try {
-                Write-ModuleTrace 'Rip audio : formulaire affiche (pompe active), appel de startRip...'
-                [CdRepo.WmpRip]::StartRip($cdrom)
+                Write-ModuleTrace 'Rip audio : pompe active, appel de startRip (slot vtable typelib)...'
+                $raw.StartRip()
                 Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
                 $timer.Start()
             }
@@ -539,7 +600,7 @@ function Invoke-CdAudioRip {
         [void][System.Windows.Forms.Application]::Run($form)
 
         if ($script:RipError) { throw $script:RipError }
-        if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat (formulaire ferme prematurement)." }
+        if (-not $script:RipResult) { throw "La boucle de rip s'est terminee sans resultat." }
 
         if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
         Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
