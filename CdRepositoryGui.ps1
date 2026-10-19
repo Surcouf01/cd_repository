@@ -76,10 +76,6 @@ $xamlText = @'
         <!-- Barre d'etat -->
         <StatusBar Grid.Row="4" Margin="0,8,0,0">
             <StatusBarItem>
-                <ProgressBar x:Name="PbBusy" Width="140" Height="16" IsIndeterminate="True"
-                             Visibility="Collapsed" ToolTip="Operation en cours..."/>
-            </StatusBarItem>
-            <StatusBarItem>
                 <TextBlock x:Name="TxtStatus" Text="Pret."/>
             </StatusBarItem>
         </StatusBar>
@@ -93,7 +89,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 $controls = @{}
 foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh',
                'TxtSearch','CmbCategory','BtnSearch','BtnClear',
-               'GridDisks','ListContent','TxtStatus','PbBusy') {
+               'GridDisks','ListContent','TxtStatus') {
     $controls[$n] = $window.FindName($n)
 }
 
@@ -108,18 +104,96 @@ function Set-Status {
     else { $controls['TxtStatus'].Foreground = 'Black' }
 }
 
-function Start-Busy {
-    param([string]$Message)
+function Show-CopyOverlay {
+    param([string]$Title, [string]$SourceLetter)
+    $ovXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Copie en cours" Width="520" Height="240" WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="WhiteSmoke" ShowInTaskbar="False"
+        AllowsTransparency="False" Topmost="True">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" HorizontalAlignment="Center" FontSize="15" FontWeight="Bold"
+                   Text="Copie du CD en cours..."/>
+        <Canvas Grid.Row="1" x:Name="Cvs" Height="90">
+            <Grid x:Name="FolderLeft" Canvas.Left="10" Canvas.Top="15" Width="80">
+                <Path Data="M 0,8 L 8,0 L 60,0 L 60,10 L 76,10 L 76,42 L 0,42 Z"
+                      Fill="#F5C77E" Stroke="#8A6D3B" StrokeThickness="1.5"/>
+                <TextBlock Text="CD" HorizontalAlignment="Center" Margin="0,18,0,0" Foreground="#7B5B2A" FontWeight="Bold"/>
+                <TextBlock x:Name="LblSource" HorizontalAlignment="Center" Margin="0,48,0,0" Foreground="#555"/>
+            </Grid>
+            <Grid x:Name="FolderRight" Canvas.Left="380" Canvas.Top="15" Width="80">
+                <Path Data="M 0,8 L 8,0 L 60,0 L 60,10 L 76,10 L 76,42 L 0,42 Z"
+                      Fill="#9FC5E8" Stroke="#2A5885" StrokeThickness="1.5"/>
+                <TextBlock Text="NAS" HorizontalAlignment="Center" Margin="0,18,0,0" Foreground="#1F4E79" FontWeight="Bold"/>
+                <TextBlock x:Name="LblDest" HorizontalAlignment="Center" Margin="0,48,0,0" Foreground="#555"/>
+            </Grid>
+            <Grid x:Name="Leaf" Canvas.Left="30" Canvas.Top="35" Width="28" Height="28">
+                <Ellipse Width="26" Height="26" Fill="#FFD966" Stroke="#BF9000" StrokeThickness="1.5"/>
+                <Ellipse Width="8" Height="8" Fill="White" Stroke="#BF9000" StrokeThickness="1" Margin="-2,-2,0,0"/>
+                <Ellipse Width="26" Height="26" Fill="Transparent" Stroke="#7F6000" StrokeThickness="2" StrokeDashArray="2 2" Margin="0"/>
+            </Grid>
+        </Canvas>
+        <ProgressBar Grid.Row="2" x:Name="PbPercent" Height="20" Margin="20,0" Maximum="100" Minimum="0"/>
+        <TextBlock Grid.Row="3" x:Name="LblDetail" HorizontalAlignment="Center" Margin="0,8,0,0" Foreground="#555"/>
+    </Grid>
+</Window>
+'@
+    $script:OverlayWindow = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$ovXaml)))
+    $script:OverlayCvs    = $script:OverlayWindow.FindName('Cvs')
+    $script:OverlayPb     = $script:OverlayWindow.FindName('PbPercent')
+    $script:OverlayLbl    = $script:OverlayWindow.FindName('LblDetail')
+    $script:OverlayLeaf   = $script:OverlayWindow.FindName('Leaf')
+    $null = $script:OverlayWindow.FindName('LblSource').Text = "${SourceLetter}"
+    $null = $script:OverlayWindow.FindName('LblDest').Text = 'NAS'
+
+    $anim = New-Object System.Windows.Media.Animation.DoubleAnimation
+    $anim.From = 30
+    $anim.To = 385
+    $anim.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(1400))
+    $anim.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+    $anim.AutoReverse = $false
+    [void]$script:OverlayLeaf.BeginAnimation([System.Windows.Controls.Canvas]::LeftProperty, $anim)
+
+    $rise = New-Object System.Windows.Media.Animation.DoubleAnimation
+    $rise.From = 20
+    $rise.To = 60
+    $rise.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(700))
+    $rise.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+    $rise.AutoReverse = $true
+    [void]$script:OverlayLeaf.BeginAnimation([System.Windows.Controls.Canvas]::TopProperty, $rise)
+
+    $script:OverlayWindow.Owner = $window
     $script:Busy = $true
-    $controls['PbBusy'].Visibility = 'Visible'
-    $window.Cursor = 'Wait'
-    Set-Status $Message
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnSearch','BtnClear') {
+        $controls[$b].IsEnabled = $false
+    }
+    [void]$script:OverlayWindow.Show()
 }
 
-function Stop-Busy {
+function Update-CopyProgress {
+    param([int]$Percent, [string]$Detail)
+    if ($script:OverlayWindow) {
+        $script:OverlayPb.Value = [Math]::Min(100, [Math]::Max(0, $Percent))
+        $script:OverlayLbl.Text = "$Percent % - $Detail"
+    }
+}
+
+function Hide-CopyOverlay {
+    if ($script:OverlayWindow) {
+        $script:OverlayWindow.Close()
+        $script:OverlayWindow = $null
+    }
     $script:Busy = $false
-    $controls['PbBusy'].Visibility = 'Collapsed'
-    $window.Cursor = 'Arrow'
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnSearch','BtnClear') {
+        $controls[$b].IsEnabled = $true
+    }
 }
 
 function Wait-Cursor([scriptblock]$Body) {
@@ -306,24 +380,38 @@ $controls['BtnRip'].Add_Click({
     $cat = $controls['CmbCategory'].SelectedItem
     if (-not $cat -or $cat -eq '(toutes)') { $cat = 'autre' }
 
+    Show-CopyOverlay -Title $title -SourceLetter $letter
+
     $modulePath = Join-Path $here 'CdRepository.psd1'
     $ps = [powershell]::Create().AddScript({
-        param($mod, $letter, $title, $cat)
+        param($mod, $letter, $title, $cat, $uiHash)
         Import-Module $mod -Force
-        Copy-CdToRepository -Title $title -DriveLetter $letter -Category $cat
-    }).AddArgument($modulePath).AddArgument($letter).AddArgument($title).AddArgument($cat)
+        $cb = {
+            param([int]$pct, [string]$detail)
+            $uiHash.Queue.Add(@{ Pct = $pct; Detail = $detail })
+        }
+        Copy-CdToRepository -Title $title -DriveLetter $letter -Category $cat -ProgressCallback $cb
+    })
+    $null = $ps.AddArgument($modulePath).AddArgument($letter).AddArgument($title).AddArgument($cat)
+    $uiQueue = New-Object System.Collections.ArrayList
+    $uiHash = @{ Queue = $uiQueue }
+    $null = $ps.AddArgument($uiHash)
     $ps.Runspace = [runspacefactory]::CreateRunspace()
     $ps.Runspace.ApartmentState = 'MTA'
     $ps.Runspace.Open()
 
     $script:CopyPs = $ps
     $script:CopyResult = $ps.BeginInvoke()
-    Start-Busy "Copie de '$title' depuis ${letter}: ... (ne pas fermer l'application)"
 
     $timer = New-Object System.Windows.Threading.DispatcherTimer
-    $timer.Interval = [TimeSpan]::FromMilliseconds(400)
+    $timer.Interval = [TimeSpan]::FromMilliseconds(200)
     $script:CopyTimer = $timer
     $timer.Add_Tick({
+        while ($uiQueue.Count -gt 0) {
+            $item = $uiQueue[0]
+            $uiQueue.RemoveAt(0)
+            Update-CopyProgress -Percent $item.Pct -Detail $item.Detail
+        }
         if ($script:CopyResult.IsCompleted) {
             $script:CopyTimer.Stop()
             try {
@@ -338,10 +426,11 @@ $controls['BtnRip'].Add_Click({
             }
             catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
             finally {
+                $uiQueue.Clear()
+                Hide-CopyOverlay
                 $script:CopyPs.Runspace.Close()
                 $script:CopyPs.Dispose()
                 $script:CopyPs = $null
-                Stop-Busy
                 Update-DiskGrid
             }
         }

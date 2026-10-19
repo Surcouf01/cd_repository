@@ -76,7 +76,8 @@ function New-IsoImageFromDirectory {
     param(
         [Parameter(Mandatory)][string]$SourceDirectory,
         [Parameter(Mandatory)][string]$DestinationIso,
-        [Parameter(Mandatory)][string]$VolumeLabel
+        [Parameter(Mandatory)][string]$VolumeLabel,
+        [scriptblock]$ProgressCallback
     )
     if (-not (Test-Path $SourceDirectory)) { throw "Repertoire source introuvable : $SourceDirectory" }
     if (-not ('CdRepo.IsoStream' -as [type])) {
@@ -104,9 +105,45 @@ namespace CdRepo {
                 finally { Marshal.FreeHGlobal(pcb); }
             }
         }
+        public static void CopyStream(object comStream, string destinationIso, Action<long,long> progress) {
+            IStream image = (IStream)comStream;
+            System.Runtime.InteropServices.ComTypes.STATSTG st;
+            image.Stat(out st, 1);
+            long total = st.cbSize;
+            long done = 0;
+            int loops = 0;
+            using (FileStream fs = new FileStream(destinationIso, FileMode.Create, FileAccess.Write)) {
+                byte[] buf = new byte[1048576];
+                IntPtr pcb = Marshal.AllocHGlobal(8);
+                try {
+                    while (true) {
+                        image.Read(buf, buf.Length, pcb);
+                        long read = Marshal.ReadInt64(pcb);
+                        if (read <= 0) break;
+                        fs.Write(buf, 0, (int)read);
+                        done += read;
+                        if (progress != null && (++loops % 8 == 0)) progress(done, total);
+                    }
+                }
+                finally { Marshal.FreeHGlobal(pcb); }
+            }
+            if (progress != null) progress(total, total);
+        }
     }
 }
 '@
+    }
+    $action = $null
+    if ($ProgressCallback) {
+        $userCb = $ProgressCallback
+        $cbBlock = {
+            param([long]$pos, [long]$total)
+            if ($total -gt 0) {
+                $p = 70 + [int](30 * $pos / $total)
+                & $userCb $p ("Ecriture de l'ISO : $([math]::Round(100 * $pos / $total)) %")
+            }
+        }.GetNewClosure()
+        $action = [Action[long,long]]$cbBlock
     }
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
     try {
@@ -115,7 +152,7 @@ namespace CdRepo {
         $fsi.ChooseImageDefaultsForMediaType(12)  # CD ~650-700 Mo
         $fsi.Root.AddTree((Resolve-Path $SourceDirectory).Path, $false)
         $result = $fsi.CreateResultImage()
-        [CdRepo.IsoStream]::CopyStream($result.ImageStream, [System.IO.Path]::GetFullPath($DestinationIso))
+        [CdRepo.IsoStream]::CopyStream($result.ImageStream, [System.IO.Path]::GetFullPath($DestinationIso), $action)
     }
     finally {
         if ($null -ne $result) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($result) }
@@ -130,6 +167,7 @@ function Copy-CdToRepository {
         [Parameter(Mandatory)][string]$DriveLetter,
         [Parameter(Mandatory)][ValidateSet('jeux','peripheriques','films','musique','autre')][string]$Category,
         [string]$Description = '',
+        [scriptblock]$ProgressCallback,
         [switch]$NoIndex
     )
     $cfg = Import-CdConfig
@@ -155,20 +193,32 @@ function Copy-CdToRepository {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
         Write-Host "Copie locale du contenu du disque ($src -> $tempRoot)..."
-        Get-ChildItem -LiteralPath $srcRoot -Force | ForEach-Object {
-            if ($_.PSIsContainer) {
-                Copy-Item -LiteralPath $_.FullName -Destination $tempRoot -Recurse -Force
-            } else {
-                Copy-Item -LiteralPath $_.FullName -Destination $tempRoot -Force
+        $allFiles = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -File -ErrorAction SilentlyContinue)
+        if ($allFiles.Count -eq 0) { throw "Le disque dans $src est vide ou illisible." }
+        $allDirs = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -Directory -ErrorAction SilentlyContinue)
+        foreach ($d in $allDirs) {
+            $dest = Join-Path $tempRoot $d.FullName.Substring($srcRoot.Length)
+            if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
+        }
+        $totalBytes = ($allFiles | Measure-Object Length -Sum).Sum
+        if (-not $totalBytes) { $totalBytes = 0 }
+        $copied = 0; $n = 0
+        foreach ($f in $allFiles) {
+            Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $tempRoot $f.FullName.Substring($srcRoot.Length)) -Force
+            $copied += $f.Length; $n++
+            if ($ProgressCallback -and $totalBytes -gt 0) {
+                $pct = [int](70 * $copied / $totalBytes)
+                & $ProgressCallback $pct ("Copie des fichiers : $n / $($allFiles.Count)")
             }
         }
-        if (-not (Get-ChildItem -LiteralPath $tempRoot -Force)) { throw "Le disque dans $src est vide ou illisible." }
+        if ($ProgressCallback) { & $ProgressCallback 70 'Creation de l''image ISO...' }
 
         Write-Host "Creation de l'ISO : $isoPath"
-        New-IsoImageFromDirectory -SourceDirectory $tempRoot -DestinationIso $isoPath -VolumeLabel ($safe -replace ' ','_')
+        New-IsoImageFromDirectory -SourceDirectory $tempRoot -DestinationIso $isoPath -VolumeLabel ($safe -replace ' ','_') -ProgressCallback $ProgressCallback
         if (-not (Test-Path $isoPath)) { throw "La creation de l'ISO a echoue." }
         $size = (Get-Item $isoPath).Length
         Write-Host "OK : $isoPath ($([math]::Round($size/1MB,1)) Mo)"
+        if ($ProgressCallback) { & $ProgressCallback 96 'Mise a jour de l''index...' }
 
         if (-not $NoIndex) {
             New-CdIndex | Out-Null
