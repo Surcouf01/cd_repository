@@ -434,6 +434,10 @@ $controls['BtnRip'].Add_Click({
     $timer.Interval = [TimeSpan]::FromMilliseconds(200)
     $script:CopyTimer = $timer
     $timer.Add_Tick({
+        if ($null -eq $script:CopyPs -or $null -eq $script:CopyResult -or $null -eq $script:CopyQueue) {
+            $script:CopyTimer.Stop()
+            return
+        }
         while ($script:CopyQueue.Count -gt 0) {
             $item = $script:CopyQueue[0]
             $script:CopyQueue.RemoveAt(0)
@@ -447,6 +451,7 @@ $controls['BtnRip'].Add_Click({
         }
         if ($script:CopyResult.IsCompleted) {
             $script:CopyTimer.Stop()
+            $script:CopyResult = $null
             try {
                 $out = $script:CopyPs.EndInvoke($script:CopyResult)
                 $errs = @($script:CopyPs.Streams.Error.ReadAll())
