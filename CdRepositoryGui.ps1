@@ -853,6 +853,14 @@ $controls['BtnDelete'].Add_Click({
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
 
 $app = New-Object System.Windows.Application
+$app.Add_DispatcherUnhandledException({
+    param($sender, $e)
+    Write-ErrorLog -Context 'DISPATCHER' -Error $e.Exception
+    [System.Windows.MessageBox]::Show(
+        "Erreur interne de l'interface :`n`n$($e.Exception.Message)`n`nL'application reste ouverte. Details dans CdRepositoryGui.log.",
+        'Erreur interne', 'OK', 'Error') | Out-Null
+    $e.Handled = $true
+})
 $window.Add_Loaded({
     [void]$window.Activate()
     [void]$window.Focus()

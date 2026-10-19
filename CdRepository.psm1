@@ -487,13 +487,21 @@ function Invoke-CdAudioRip {
         [CdRepo.WmpRip]::StartRip($cdrom)
         Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
 
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+        Write-ModuleTrace 'Rip audio : pompe de messages ActiveX (DoEvents) - requis par WMP.'
+        $null = [System.Windows.Forms.Application]::DoEvents()
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+        $lastPoll = Get-Date
         $state = 1
         $poll = 0
         $pct = 0
         Write-ModuleTrace "Rip audio : surveillance (timeout $TimeoutMinutes min)..."
         while ($state -eq 1) {
-            Start-Sleep -Milliseconds 1000
+            [void][System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+            $tick = Get-Date
+            if (($tick - $lastPoll).TotalMilliseconds -lt 1000) { continue }
+            $lastPoll = $tick
             $poll++
             $st = [CdRepo.WmpRip]::GetStatus($cdrom)
             $state = $st.State
