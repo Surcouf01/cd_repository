@@ -434,10 +434,6 @@ namespace CdRepo {
 }
 '@
     }
-    if (-not (Test-Path "$env:ProgramFiles\Windows Media Player\wmp.dll") -and
-        -not (Test-Path "${env:ProgramFiles(x86)}\Windows Media Player\wmp.dll")) {
-        throw "Windows Media Player est requis pour le rip audio (wmp.dll introuvable)."
-    }
     Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
     $wmp = New-Object -ComObject WMPlayer.OCX.7
     Write-ModuleTrace 'Rip audio : objet WMP cree.'
