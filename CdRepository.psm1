@@ -188,13 +188,34 @@ function Test-CdIsAudio {
     return $false
 }
 
-function Get-WmpRipDestination {
+function Get-KnownMusicFolder {
     [CmdletBinding()]
     param()
-    $base = Join-Path $env:USERPROFILE 'Music'
-    $sub = Join-Path $base 'Rip CD Repository'
-    if (-not (Test-Path $sub)) { New-Item -ItemType Directory -Path $sub -Force | Out-Null }
-    return $sub
+    $folders = New-Object System.Collections.ArrayList
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $ns = $shell.NameSpace(13)  # ssfMUSIC = dossier Mes musiques connu
+        if ($ns) { [void]$folders.Add($ns.Self.Path) }
+    } catch { }
+    [void]$folders.Add((Join-Path $env:USERPROFILE 'Music'))
+    [void]$folders.Add((Join-Path $env:USERPROFILE 'Mes musiques'))
+    [void]$folders.Add((Join-Path $env:USERPROFILE 'Ma musique'))
+    foreach ($f in $folders) {
+        if ($f -and (Test-Path $f)) { return $f }
+    }
+    throw "Dossier Musique introuvable."
+}
+
+function Get-RippedFiles {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][datetime]$Since)
+    $musicRoot = Get-KnownMusicFolder
+    $exts = @('.wma','.mp3','.wav','.m4a','.flac')
+    $files = @(Get-ChildItem -LiteralPath $musicRoot -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $exts -contains $_.Extension.ToLower() -and $_.LastWriteTime -ge $Since.AddSeconds(-5) })
+    if ($files.Count -eq 0) { return @() }
+    $newestDir = ($files | Sort-Object LastWriteTime -Descending | Select-Object -First 1).DirectoryName
+    return @($files | Where-Object { $_.DirectoryName -eq $newestDir -or $files.Count -le 30 })
 }
 
 function Invoke-CdAudioRip {
@@ -274,6 +295,7 @@ namespace CdRepo {
         }
         if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $($playlist.count) piste(s). Demarrage du rip..." }
 
+        $ripStart = Get-Date
         [CdRepo.WmpRip]::StartRip($cdrom)
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
         $state = 1
@@ -291,7 +313,11 @@ namespace CdRepo {
             throw "Le rip audio s est termine de facon inattendue (etat $state)."
         }
         if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
-        return (Get-WmpRipDestination)
+        $ripped = Get-RippedFiles -Since $ripStart
+        if ($ripped.Count -eq 0) {
+            throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
+        }
+        return $ripped
     }
     finally {
         [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wmp)
@@ -318,7 +344,7 @@ function Copy-CdToRepository {
         $isAudio = Test-CdIsAudio -DriveLetter $drive
         if ($isAudio) {
             if ($ProgressCallback) { & $ProgressCallback 0 'CD audio detecte : extraction des pistes...' }
-            $ripDir = Invoke-CdAudioRip -DriveLetter $drive -ProgressCallback $ProgressCallback
+            $rippedFiles = @(Invoke-CdAudioRip -DriveLetter $drive -ProgressCallback $ProgressCallback)
             $catDir = Join-Path $root (Get-MediaCategory $Category)
             if (-not (Test-Path $catDir)) { New-Item -ItemType Directory -Path $catDir -Force | Out-Null }
             $safe = ($Title -replace '[\\/:*?"<>|]','_').Trim()
@@ -327,7 +353,7 @@ function Copy-CdToRepository {
             while (Test-Path $destDir) { $destDir = Join-Path $catDir ("{0}_{1}" -f $safe, $i); $i++ }
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
             $copied = 0
-            $files = @(Get-ChildItem -LiteralPath $ripDir -Recurse -File -ErrorAction SilentlyContinue)
+            $files = $rippedFiles
             $totalBytes = ($files | Measure-Object Length -Sum).Sum
             if ($totalBytes) { $totalBytes = [long]$totalBytes }
             foreach ($f in $files) {
@@ -337,7 +363,7 @@ function Copy-CdToRepository {
                     & $ProgressCallback ([int](90 * $copied / $totalBytes)) ("Transfert vers le NAS : $($f.Name)")
                 }
             }
-            if ($files.Count -eq 0) { throw "Le rip audio n a produit aucun fichier dans $ripDir. Verifiez le format de sortie de Windows Media Player." }
+            if ($files.Count -eq 0) { throw "Le rip audio n a produit aucun fichier. Verifiez le format de sortie de Windows Media Player." }
             $totalSize = ($files | Measure-Object Length -Sum).Sum
             New-CdIndex | Out-Null
             $index = Get-CdIndex
@@ -714,7 +740,7 @@ function Move-CdEntry {
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
     'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
-    'Test-CdIsAudio','Invoke-CdAudioRip','Get-WmpRipDestination',
+    'Test-CdIsAudio','Invoke-CdAudioRip','Get-KnownMusicFolder','Get-RippedFiles',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
     'Get-CdCategories','Update-CdCategories','Move-CdEntry'
