@@ -76,6 +76,10 @@ $xamlText = @'
         <!-- Barre d'etat -->
         <StatusBar Grid.Row="4" Margin="0,8,0,0">
             <StatusBarItem>
+                <ProgressBar x:Name="PbBusy" Width="140" Height="16" IsIndeterminate="True"
+                             Visibility="Collapsed" ToolTip="Operation en cours..."/>
+            </StatusBarItem>
+            <StatusBarItem>
                 <TextBlock x:Name="TxtStatus" Text="Pret."/>
             </StatusBarItem>
         </StatusBar>
@@ -87,18 +91,35 @@ $reader = New-Object System.Xml.XmlNodeReader ([xml]$xamlText)
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
 $controls = @{}
-$window.FindName('BtnRip')      | Out-Null
 foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh',
                'TxtSearch','CmbCategory','BtnSearch','BtnClear',
-               'GridDisks','ListContent','TxtStatus') {
+               'GridDisks','ListContent','TxtStatus','PbBusy') {
     $controls[$n] = $window.FindName($n)
 }
+
+$script:Busy = $false
+$script:CopyPs = $null
+$script:CopyResult = $null
 
 function Set-Status {
     param([string]$Text, [switch]$Error)
     $controls['TxtStatus'].Text = $Text
     if ($Error) { $controls['TxtStatus'].Foreground = 'Red' }
     else { $controls['TxtStatus'].Foreground = 'Black' }
+}
+
+function Start-Busy {
+    param([string]$Message)
+    $script:Busy = $true
+    $controls['PbBusy'].Visibility = 'Visible'
+    $window.Cursor = 'Wait'
+    Set-Status $Message
+}
+
+function Stop-Busy {
+    $script:Busy = $false
+    $controls['PbBusy'].Visibility = 'Collapsed'
+    $window.Cursor = 'Arrow'
 }
 
 function Wait-Cursor([scriptblock]$Body) {
@@ -161,6 +182,22 @@ function Update-ContentPane {
     }
 }
 
+function Get-CdDriveLetters {
+    $letters = @()
+    try {
+        $drives = Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=5' -ErrorAction Stop
+        foreach ($d in $drives) {
+            if ($d.DeviceID -match '^([A-Za-z]):$') { $letters += $Matches[1].ToUpper() }
+        }
+    }
+    catch {
+        foreach ($d in (Get-WmiObject Win32_LogicalDisk -Filter 'DriveType=5' -ErrorAction SilentlyContinue)) {
+            if ($d.DeviceID -match '^([A-Za-z]):$') { $letters += $Matches[1].ToUpper() }
+        }
+    }
+    return $letters
+}
+
 # --- Initialisation ---
 $null = Import-CdConfig
 $combo = $controls['CmbCategory']
@@ -214,20 +251,25 @@ $controls['CmbCategory'].Add_SelectionChanged({
 })
 
 $controls['BtnRip'].Add_Click({
+    if ($script:Busy) { Set-Status 'Une operation est deja en cours.' -Error; return }
+
     $dlgXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Copier un CD" Height="230" Width="420" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        Title="Copier un CD" Height="240" Width="440" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <TextBlock Grid.Row="0" Text="Lettre du lecteur de CD (ex: D) :"/>
-        <TextBox x:Name="DlgLetter" Grid.Row="1" Height="24" Margin="0,4,0,8"/>
+        <TextBlock Grid.Row="0" Text="Lecteur de CD :"/>
+        <ComboBox x:Name="DlgLetter" Grid.Row="1" Height="24" Margin="0,4,0,8" IsEditable="True"
+                  ToolTip="Lettres detectees automatiquement ; modifiable si besoin"/>
         <TextBlock Grid.Row="2" Text="Titre :"/>
         <TextBox x:Name="DlgTitle" Grid.Row="3" Height="24" Margin="0,4,0,8"/>
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+        <TextBlock Grid.Row="4" Text=""/>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="DlgOk" Content="Copier" Width="90" Margin="0,0,8,0" IsDefault="True"/>
             <Button x:Name="DlgCancel" Content="Annuler" Width="90" IsCancel="True"/>
         </StackPanel>
@@ -237,28 +279,72 @@ $controls['BtnRip'].Add_Click({
     $dialog = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$dlgXaml)))
     $dlgLetter = $dialog.FindName('DlgLetter')
     $dlgTitle  = $dialog.FindName('DlgTitle')
-    $dlgOk     = $dialog.FindName('DlgOk')
-    $result = $false
-    $dlgOk.Add_Click({
-        if ($dlgLetter.Text.Trim() -and $dlgTitle.Text.Trim()) { $result = $true; $dialog.DialogResult = $true }
-        else { [System.Windows.MessageBox]::Show('Lettre et titre requis.', 'Validation', 'OK', 'Warning') | Out-Null }
-    })
+
+    $letters = Get-CdDriveLetters
+    foreach ($l in $letters) { $dlgLetter.Items.Add($l) | Out-Null }
+    if ($letters.Count -gt 0) {
+        $dlgLetter.SelectedIndex = 0
+        $dlgTitle.Focus()
+    } else {
+        $dlgLetter.Text = ''
+        $dlgLetter.Focus()
+        [System.Windows.MessageBox]::Show(
+            "Aucun lecteur de CD detecte.`nSaisissez une lettre manuellement si necessaire.",
+            'Lecteurs', 'OK', 'Information') | Out-Null
+    }
+
     $dialog.Owner = $window
-    if ($dialog.ShowDialog()) {
-        $letter = $dlgLetter.Text.Trim()
-        $title  = $dlgTitle.Text.Trim()
-        $cat    = $controls['CmbCategory'].SelectedItem
-        if (-not $cat -or $cat -eq '(toutes)') { $cat = 'autre' }
-        Wait-Cursor {
+    if (-not $dialog.ShowDialog()) { return }
+    $letter = $dlgLetter.Text.Trim().TrimEnd(':', '\')
+    $title  = $dlgTitle.Text.Trim()
+    if (-not $letter -or -not $title) {
+        Set-Status 'Lettre du lecteur et titre requis.' -Error
+        return
+    }
+    $cat = $controls['CmbCategory'].SelectedItem
+    if (-not $cat -or $cat -eq '(toutes)') { $cat = 'autre' }
+
+    $modulePath = Join-Path $here 'CdRepository.psd1'
+    $ps = [powershell]::Create().AddScript({
+        param($mod, $letter, $title, $cat)
+        Import-Module $mod -Force
+        Copy-CdToRepository -Title $title -DriveLetter $letter -Category $cat
+    }).AddArgument($modulePath).AddArgument($letter).AddArgument($title).AddArgument($cat)
+    $ps.Runspace = [runspacefactory]::CreateRunspace()
+    $ps.Runspace.ApartmentState = 'MTA'
+    $ps.Runspace.Open()
+
+    $script:CopyPs = $ps
+    $script:CopyResult = $ps.BeginInvoke()
+    Start-Busy "Copie de '$title' depuis ${letter}: ... (ne pas fermer l'application)"
+
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(400)
+    $script:CopyTimer = $timer
+    $timer.Add_Tick({
+        if ($script:CopyResult.IsCompleted) {
+            $script:CopyTimer.Stop()
             try {
-                Set-Status "Copie de '$title' depuis $letter`: ... (peut prendre plusieurs minutes)"
-                $iso = Copy-CdToRepository -Title $title -DriveLetter $letter -Category $cat
-                if ($iso) { Set-Status "Copie terminee : $iso" }
-                Update-DiskGrid
+                $out = $script:CopyPs.EndInvoke($script:CopyResult)
+                $errs = @($script:CopyPs.Streams.Error.ReadAll())
+                if ($errs.Count -gt 0) {
+                    Set-Status "Erreur : $($errs[0].Exception.Message)" -Error
+                } else {
+                    $iso = ($out | Select-Object -Last 1)
+                    Set-Status "Copie terminee : $iso"
+                }
             }
             catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
+            finally {
+                $script:CopyPs.Runspace.Close()
+                $script:CopyPs.Dispose()
+                $script:CopyPs = $null
+                Stop-Busy
+                Update-DiskGrid
+            }
         }
-    }
+    })
+    $timer.Start()
 })
 
 $controls['BtnMount'].Add_Click({
@@ -267,7 +353,7 @@ $controls['BtnMount'].Add_Click({
     Wait-Cursor {
         try {
             $m = Mount-CdFromRepository -Id $sel.Id
-            Set-Status "Monte sur $($m.Letter): . Explorateur..."
+            Set-Status "Monte sur $($m.Letter): . Ouverture de l'Explorateur..."
             Start-Process "explorer.exe" ("$($m.Letter):\")
         }
         catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
