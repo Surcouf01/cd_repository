@@ -379,6 +379,64 @@ function Get-RippedFiles {
     return @($files | Where-Object { $_.DirectoryName -eq $newestDir -or $files.Count -le 30 })
 }
 
+function Get-WmpInteropAssembly {
+    [CmdletBinding()]
+    param()
+    $dir = Join-Path $env:TEMP 'cdrepo_wmp'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $dllPath = Join-Path $dir 'WMPLib.Interop.dll'
+    if (-not (Test-Path $dllPath)) {
+        Write-ModuleTrace 'Generation de l assembly d interop WMPLib depuis la typelib de wmp.dll...'
+        if (-not ('CdRepo.WmpInteropGen' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Reflection;
+using System.Reflection.Emit;
+
+namespace CdRepo {
+    public class TlbSink : ITypeLibImporterNotify {
+        public void ReportEvent(ImporterEventKind eventKind, int eventCode, string eventMsg) { }
+        public Assembly ResolveRef(object typeLib) { return null; }
+    }
+
+    public class WmpInteropGen {
+        [DllImport("oleaut32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        private static extern void LoadTypeLibEx(string strTypeLibName, RegKind regKind, out System.Runtime.InteropServices.ComTypes.ITypeLib typeLib);
+
+        private enum RegKind { Default = 0, Register = 1, None = 2 }
+
+        public static string Generate(string wmpDllPath, string outputDir) {
+            System.Runtime.InteropServices.ComTypes.ITypeLib tlb;
+            LoadTypeLibEx(wmpDllPath, RegKind.None, out tlb);
+            string outPath = System.IO.Path.Combine(outputDir, "WMPLib.Interop.dll");
+            TypeLibConverter converter = new TypeLibConverter();
+            AssemblyBuilder ab = converter.ConvertTypeLibToAssembly(
+                tlb, outPath, TypeLibImporterFlags.None, new TlbSink(), new string[] { "WMPLib" }, null);
+            return outPath;
+        }
+    }
+}
+'@
+        }
+        $wmpDll = $null
+        try {
+            $clsid = (Get-ItemProperty -Path 'Registry::HKEY_CLASSES_ROOT\WMPlayer.OCX.7\CLSID' -ErrorAction Stop).'(default)'
+            if ($clsid) {
+                $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue).'(default)'
+                if (-not $server) { $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\LocalServer32" -ErrorAction SilentlyContinue).'(default)' }
+                if ($server) { $server = [Environment]::ExpandEnvironmentVariables($server.Trim('"')) }
+            }
+        } catch { }
+        if (-not $server -or -not (Test-Path $server)) { $server = Join-Path $env:SystemRoot 'System32\wmp.dll' }
+        if (-not (Test-Path $server)) { throw "wmp.dll introuvable (registre COM et System32) : rip audio impossible." }
+        Write-ModuleTrace "Typelib source : $server"
+        $null = [CdRepo.WmpInteropGen]::Generate($server, $dir)
+        Write-ModuleTrace 'Assembly d interop WMPLib genere.'
+    }
+    return [Reflection.Assembly]::LoadFrom($dllPath)
+}
+
 function Invoke-CdAudioRip {
     [CmdletBinding()]
     param(
@@ -387,35 +445,42 @@ function Invoke-CdAudioRip {
         [int]$TimeoutMinutes = 90
     )
     $drive = $DriveLetter.TrimEnd('\',':')
-    Write-ModuleTrace 'Rip audio : utilisation du late-binding IDispatch (plus d interop C#).'
-    Write-ModuleTrace 'Rip audio : creation de l objet COM WMPlayer.OCX.7...'
-    $wmp = New-Object -ComObject WMPlayer.OCX.7
-    Write-ModuleTrace 'Rip audio : objet WMP cree.'
+    $asm = Get-WmpInteropAssembly
+    Write-ModuleTrace 'Rip audio : interop WMPLib charge.'
+    $playerClass = $asm.GetTypes() | Where-Object { $_.Name -eq 'WindowsMediaPlayerClass' } | Select-Object -First 1
+    if (-not $playerClass) { throw "Classe WindowsMediaPlayerClass introuvable dans l interop genere." }
+    $player = [Activator]::CreateInstance($playerClass)
+    Write-ModuleTrace 'Rip audio : lecteur WMP typ cree.'
     try {
-        $cdroms = $wmp.cdromCollection
+        $cdroms = $player.cdromCollection
         if (-not $cdroms) { throw "Collection de lecteurs WMP indisponible." }
         Write-ModuleTrace "Rip audio : recherche du lecteur ${drive}: dans la collection WMP..."
         $cdrom = $null
         try { $cdrom = $cdroms.getByDriveSpecifier("${drive}:") } catch { Write-ModuleTrace "Rip audio : getByDriveSpecifier a echoue : $($_.Exception.Message)" }
         if (-not $cdrom) {
-            for ($i = 0; $i -lt $cdroms.count; $i++) {
-                $c = $cdroms.Item($i)
+            for ($k = 0; $k -lt $cdroms.count; $k++) {
+                $c = $cdroms.Item($k)
                 if ($c -and "$($c.driveSpecifier)" -match "^${drive}$") { $cdrom = $c; break }
             }
         }
         if (-not $cdrom) { throw "WMP ne trouve pas de CD audio dans le lecteur ${drive}:." }
         Write-ModuleTrace 'Rip audio : lecteur trouve. Lecture de la playlist...'
         $playlist = $cdrom.Playlist
-        Write-ModuleTrace 'Rip audio : playlist lue.'
         $trackCount = 0
         try { $trackCount = $playlist.count } catch { }
         if ($trackCount -eq 0) { throw "Aucune piste audio detectee dans ${drive}:." }
         Write-ModuleTrace "Rip audio : $($trackCount) piste(s) detectee(s)."
-        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Demarrage du rip..." }
 
+        $ripType = $asm.GetType('WMPLib.IWMPCdromRip')
+        if (-not $ripType) { throw "Interface IWMPCdromRip introuvable dans l interop genere." }
+        $rip = [System.Runtime.InteropServices.Marshal]::GetTypedObjectForIUnknown(
+            [System.Runtime.InteropServices.Marshal]::GetIUnknownForObject($cdrom), $ripType)
+        Write-ModuleTrace 'Rip audio : interface IWMPCdromRip obtenue (QueryInterface).'
+
+        if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte : $trackCount piste(s). Demarrage du rip..." }
         $ripStart = Get-Date
-        Write-ModuleTrace 'Rip audio : appel de startRip (late-binding)...'
-        $null = $cdrom.startRip()
+        Write-ModuleTrace 'Rip audio : appel de startRip (interface typée)...'
+        $rip.startRip()
         Write-ModuleTrace 'Rip audio : startRip retourne sans erreur.'
 
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -426,21 +491,13 @@ function Invoke-CdAudioRip {
         while ($state -eq 1) {
             Start-Sleep -Milliseconds 1000
             $poll++
-            try {
-                $state = [int]$cdrom.ripState
-                $pct = [int]$cdrom.ripProgress
-            }
-            catch {
-                Write-ModuleTrace "Rip audio : lecture de ripState/ripProgress impossible : $($_.Exception.Message)"
-                $state = 2
-                $pct = 100
-                break
-            }
+            $state = [int]$rip.ripState
+            $pct = [int]$rip.ripProgress
             if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
             if ($state -ne 1) { Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)." }
             if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
             if ((Get-Date) -gt $deadline) {
-                try { $null = $cdrom.stopRip() } catch { }
+                try { $rip.stopRip() } catch { }
                 throw "Timeout du rip audio apres $TimeoutMinutes minutes."
             }
         }
@@ -457,7 +514,7 @@ function Invoke-CdAudioRip {
         return $ripped
     }
     finally {
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wmp)
+        try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($player) } catch { }
     }
 }
 
