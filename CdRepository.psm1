@@ -8,9 +8,14 @@ $script:TraceFile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 
 
 function Write-ModuleTrace {
     param([string]$Message)
-    $target = $script:TraceFile
-    if ($env:CdRepoLogFile) { $target = $env:CdRepoLogFile }
-    try { Add-Content -Path $target -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [MODULE] $Message" -Encoding UTF8 } catch { }
+    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [MODULE] $Message"
+    if ($env:CdRepoLogFile) {
+        try { Add-Content -Path $env:CdRepoLogFile -Value $line -Encoding UTF8 } catch { }
+    }
+    if ($script:TraceFile) {
+        try { Add-Content -Path $script:TraceFile -Value $line -Encoding UTF8 } catch { }
+    }
+    try { Write-Host $line -ForegroundColor DarkCyan } catch { }
 }
 $script:IndexFile = $null
 $script:Categories = @('jeux','peripheriques','films','musique','autre')
