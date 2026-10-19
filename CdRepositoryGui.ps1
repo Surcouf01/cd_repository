@@ -589,19 +589,18 @@ $controls['BtnRip'].Add_Click({
         } catch { }
     }
     if ($isAudio -and -not $script:Requirements.WmpCom) {
-            Set-Status 'Copie impossible : CD audio et Windows Media Player absent.' -Error
-            [System.Windows.MessageBox]::Show(
-                "Ce CD audio ne peut pas etre copie : Windows Media Player est absent ou non pilotable.`n`nInstallation : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player`nou (admin) : Add-WindowsCapability -Online -Name 'Media.WindowsMediaPlayer'`n`nLes CD de donnees ne sont pas concernes par cette limitation.",
-                'Windows Media Player requis', 'OK', 'Error') | Out-Null
-            return
-        }
-        if (-not $isAudio) {
-            Set-Status "Aucun disque lisible dans ${letter}:." -Error
-            [System.Windows.MessageBox]::Show(
-                "Aucun disque avec systeme de fichiers detecte dans ${letter}:, et il ne s'agit pas d'un CD audio reconnu.",
-                'Disque illisible', 'OK', 'Warning') | Out-Null
-            return
-        }
+        Set-Status 'Copie impossible : CD audio et Windows Media Player absent.' -Error
+        [System.Windows.MessageBox]::Show(
+            "Ce CD audio ne peut pas etre copie : Windows Media Player est absent ou non pilotable.`n`nInstallation : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player`nou (admin) : Add-WindowsCapability -Online -Name 'Media.WindowsMediaPlayer'`n`nLes CD de donnees ne sont pas concernes par cette limitation.",
+            'Windows Media Player requis', 'OK', 'Error') | Out-Null
+        return
+    }
+    if (-not $hasFs -and -not $isAudio) {
+        Set-Status "Aucun disque lisible dans ${letter}:." -Error
+        [System.Windows.MessageBox]::Show(
+            "Aucun disque avec systeme de fichiers detecte dans ${letter}:, et il ne s'agit pas d'un CD audio reconnu.",
+            'Disque illisible', 'OK', 'Warning') | Out-Null
+        return
     }
     $cat = $dlgCat.SelectedItem
     if (-not $cat) { $cat = 'autre' }
