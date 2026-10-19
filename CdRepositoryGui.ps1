@@ -160,8 +160,10 @@ foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefre
 }
 
 $script:Busy = $false
-$script:CopyPs = $null
-$script:CopyResult = $null
+$script:CopyProgressFile = $null
+$script:CopyProgressPos = 0
+$script:CopyProc = $null
+$script:CopyDone = $true
 
 function Set-Status {
     param([string]$Text, [switch]$Error)
@@ -543,89 +545,92 @@ $controls['BtnRip'].Add_Click({
     Show-CopyOverlay -Title $title -SourceLetter $letter
 
     Write-TraceLog "[GUI] Copie demandee : lecteur='$letter' titre='$title' categorie='$cat'" -Color 'Cyan'
-    $modulePath = Join-Path $here 'CdRepository.psd1'
-    $ps = [powershell]::Create().AddScript({
-        param($mod, $letter, $title, $cat, $uiHash)
-        Import-Module $mod -Force
-        $cb = {
-            param([int]$pct, [string]$detail)
-            $uiHash.Queue.Add(@{ Pct = $pct; Detail = $detail })
-        }
-        Copy-CdToRepository -Title $title -DriveLetter $letter -Category $cat -ProgressCallback $cb
-    })
-    $null = $ps.AddArgument($modulePath).AddArgument($letter).AddArgument($title).AddArgument($cat)
-    $uiQueue = New-Object System.Collections.ArrayList
-    $script:CopyQueue = $uiQueue
-    $uiHash = @{ Queue = $uiQueue }
-    $null = $ps.AddArgument($uiHash)
-    $ps.Runspace = [runspacefactory]::CreateRunspace()
-    $ps.Runspace.ApartmentState = 'STA'
-    $ps.Runspace.Open()
 
-    $script:CopyPs = $ps
-    $script:CopyResult = $ps.BeginInvoke()
+    $jobScript = Join-Path $here 'Copy-CdJob.ps1'
+    $modulePath = Join-Path $here 'CdRepository.psd1'
+    $progressFile = Join-Path $env:TEMP ("cdrepo_progress_" + [guid]::NewGuid().ToString('N') + '.txt')
+    if (Test-Path $progressFile) { Remove-Item $progressFile -Force }
+
+    $script:CopyProgressFile = $progressFile
+    $script:CopyProgressPos = 0
+    $script:CopyDone = $false
+
+    $procArgs = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', $jobScript,
+                  '-ModulePath', $modulePath,
+                  '-DriveLetter', $letter,
+                  '-Title', $title,
+                  '-Category', $cat,
+                  '-ProgressFile', $progressFile)
+    Write-TraceLog "[GUI] Lancement du processus isole : powershell $($procArgs -join ' ')" -Color 'Cyan'
+    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $procArgs -PassThru -WindowStyle Hidden
+    $script:CopyProc = $proc
+    Write-TraceLog "[GUI] Processus de copie lance (PID $($proc.Id))."
 
     $timer = New-Object System.Windows.Threading.DispatcherTimer
-    $timer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $timer.Interval = [TimeSpan]::FromMilliseconds(300)
     $script:CopyTimer = $timer
     $timer.Add_Tick({
-        if ($null -eq $script:CopyPs -or $null -eq $script:CopyResult -or $null -eq $script:CopyQueue) {
-            $script:CopyTimer.Stop()
-            return
-        }
-        while ($script:CopyQueue.Count -gt 0) {
-            $item = $script:CopyQueue[0]
-            $script:CopyQueue.RemoveAt(0)
-            $fileName = ''
-            $detail = [string]$item.Detail
-            if ($detail -match '^Copie\s*:\s*(.+?)\s*\((\d+)/(\d+)\)$') {
-                $fileName = $Matches[1]
-                $detail = "Fichier $($Matches[2]) / $($Matches[3])"
-            }
-            Update-CopyProgress -Percent $item.Pct -Detail $detail -FileName $fileName
-        }
-        if ($script:CopyResult.IsCompleted) {
-            $script:CopyTimer.Stop()
-            $result = $script:CopyResult
-            $script:CopyResult = $null
-            $psInstance = $script:CopyPs
-            $script:CopyPs = $null
+        if ($script:CopyDone) { $script:CopyTimer.Stop(); return }
+
+        if (Test-Path $script:CopyProgressFile) {
             try {
-                $out = $psInstance.EndInvoke($result)
-                $errs = @($psInstance.Streams.Error.ReadAll())
-                foreach ($e in $errs) { Write-ErrorLog -Context 'COPY-RUNSPACE' -Error $e }
-                if ($errs.Count -gt 0) {
-                    $errMsg = $errs[0].Exception.Message
-                    Set-Status "Erreur : $errMsg" -Error
+                $lines = [System.IO.File]::ReadAllLines($script:CopyProgressFile)
+            } catch { $lines = @() }
+            for ($i = $script:CopyProgressPos; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                $sep = $line.IndexOf('|')
+                if ($sep -lt 1) { continue }
+                $tag = $line.Substring(0, $sep)
+                $rest = $line.Substring($sep + 1)
+                if ($tag -eq 'DONE') {
+                    $script:CopyDone = $true
+                    $script:CopyTimer.Stop()
+                    Hide-CopyOverlay
+                    Set-Status "Copie terminee : $rest"
+                    Update-DiskGrid
+                    try { Remove-Item $script:CopyProgressFile -Force -ErrorAction SilentlyContinue } catch { }
+                    return
+                }
+                elseif ($tag -eq 'ERROR') {
+                    $script:CopyDone = $true
+                    $script:CopyTimer.Stop()
+                    Hide-CopyOverlay
+                    Set-Status "Erreur : $rest" -Error
                     [System.Windows.MessageBox]::Show(
-                        "La copie a echoue :`n`n$errMsg",
+                        "La copie a echoue :`n`n$rest`n`nDetails dans CdRepositoryGui.log.",
                         'Erreur de copie', 'OK', 'Error') | Out-Null
-                } else {
-                    $iso = ($out | Select-Object -Last 1)
-                    $warns = @($script:CopyPs.Streams.Warning.ReadAll())
-                    if ($warns.Count -gt 0) {
-                        $warnMsg = ($warns | ForEach-Object { $_.Message }) -join ' | '
-                        Set-Status "Copie terminee avec avertissements : $warnMsg"
-                        [System.Windows.MessageBox]::Show(
-                            "La copie s'est terminee, mais des erreurs de lecture sont survenues :`n`n$warnMsg`n`nLes fichiers concernes ont ete exclus de l'ISO.",
-                            'Copie terminee avec avertissements', 'OK', 'Warning') | Out-Null
-                    } else {
-                        Set-Status "Copie terminee : $iso"
+                    Update-DiskGrid
+                    try { Remove-Item $script:CopyProgressFile -Force -ErrorAction SilentlyContinue } catch { }
+                    return
+                }
+                else {
+                    $pct = 0
+                    [int]::TryParse($tag, [ref]$pct) | Out-Null
+                    $fileName = ''
+                    $detail = $rest
+                    if ($detail -match '^Copie\s*:\s*(.+?)\s*\((\d+)/(\d+)\)$') {
+                        $fileName = $Matches[1]
+                        $detail = "Fichier $($Matches[2]) / $($Matches[3])"
                     }
+                    Update-CopyProgress -Percent $pct -Detail $detail -FileName $fileName
                 }
             }
-            catch {
-                Write-ErrorLog -Context 'COPY-ENDINVOKE' -Error $_
-                Set-Status "Erreur : $($_.Exception.Message)" -Error
-                [System.Windows.MessageBox]::Show(
-                    "La copie s'est terminee de facon anormale :`n`n$($_.Exception.Message)`n`nDetails dans CdRepositoryGui.log.",
-                    'Erreur de copie', 'OK', 'Error') | Out-Null
-            }
-            finally {
-                $script:CopyQueue.Clear()
+            $script:CopyProgressPos = $lines.Count
+        }
+
+        if ($script:CopyProc.HasExited) {
+            if (-not $script:CopyDone) {
+                Start-Sleep -Milliseconds 500
+                $script:CopyDone = $true
+                $script:CopyTimer.Stop()
+                $exitCode = 0
+                try { $exitCode = $script:CopyProc.ExitCode } catch { $exitCode = -1 }
+                Write-TraceLog "[GUI] Le processus de copie s est arrete (code $exitCode) sans signal DONE/ERROR." -Color 'Red'
                 Hide-CopyOverlay
-                try { $psInstance.Runspace.Close() } catch { Write-ErrorLog -Context 'RUNSPACE-CLOSE' -Error $_ }
-                try { $psInstance.Dispose() } catch { }
+                Set-Status "La copie s est arretee brutalement (code $exitCode). Voir CdRepositoryGui.log." -Error
+                [System.Windows.MessageBox]::Show(
+                    "Le processus de copie s est arrete brutalement (code $exitCode).`n`nL'interface est intacte.`nConsultez CdRepositoryGui.log pour la derniere etape atteinte.",
+                    'Copie interrompue', 'OK', 'Warning') | Out-Null
                 Update-DiskGrid
             }
         }
