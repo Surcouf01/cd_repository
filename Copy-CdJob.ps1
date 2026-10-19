@@ -8,22 +8,26 @@ param(
     [Parameter(Mandatory)][string]$DriveLetter,
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$Category,
-    [Parameter(Mandatory)][string]$ProgressFile
+    [Parameter(Mandatory)][string]$ProgressFile,
+    [string]$LogFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$logFile = Join-Path $here 'CdRepositoryGui.log'
+
+if (-not $LogFile) {
+    $LogFile = Join-Path $env:TEMP 'CdRepositoryJob.log'
+}
 
 function Write-JobTrace {
     param([string]$Message)
     $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [JOB] $Message"
-    try { Add-Content -Path $logFile -Value $line -Encoding UTF8 } catch { }
+    try { Add-Content -Path $LogFile -Value $line -Encoding UTF8 } catch { }
     Write-Host $line
 }
 
 try {
-    Write-JobTrace "Demarrage du job : lecteur='$DriveLetter' titre='$Title' categorie='$Category'"
+    Write-JobTrace "Demarrage du job (PID $PID) : lecteur='$DriveLetter' titre='$Title' categorie='$Category'"
+    Write-JobTrace "Import du module : $ModulePath"
     Import-Module $ModulePath -Force
     Write-JobTrace 'Module importe.'
 

@@ -548,7 +548,25 @@ $controls['BtnRip'].Add_Click({
 
     $jobScript = Join-Path $here 'Copy-CdJob.ps1'
     $modulePath = Join-Path $here 'CdRepository.psd1'
-    $progressFile = Join-Path $env:TEMP ("cdrepo_progress_" + [guid]::NewGuid().ToString('N') + '.txt')
+
+    # Copie locale des scripts (un chemin UNC peut empecher le lancement du job)
+    $localDir = Join-Path $env:TEMP 'cdrepo_job'
+    if (-not (Test-Path $localDir)) { New-Item -ItemType Directory -Path $localDir -Force | Out-Null }
+    $localJob = Join-Path $localDir 'Copy-CdJob.ps1'
+    $localMod = Join-Path $localDir 'CdRepository.psd1'
+    $localPsm = Join-Path $localDir 'CdRepository.psm1'
+    $localCfg = Join-Path $localDir 'config.json'
+    Copy-Item -LiteralPath $jobScript -Destination $localJob -Force
+    Copy-Item -LiteralPath $modulePath -Destination $localMod -Force
+    Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psm1') -Destination $localPsm -Force
+    if (Test-Path (Join-Path $here 'config.json')) {
+        Copy-Item -LiteralPath (Join-Path $here 'config.json') -Destination $localCfg -Force
+    }
+    Write-TraceLog "[GUI] Scripts copies en local : $localDir" -Color 'Cyan'
+    $jobScript = $localJob
+    $modulePath = $localMod
+
+    $progressFile = Join-Path $localDir ("cdrepo_progress_" + [guid]::NewGuid().ToString('N') + '.txt')
     if (Test-Path $progressFile) { Remove-Item $progressFile -Force }
 
     $script:CopyProgressFile = $progressFile
@@ -565,7 +583,8 @@ $controls['BtnRip'].Add_Click({
         '-DriveLetter', (Quote-Arg $letter),
         '-Title', (Quote-Arg $title),
         '-Category', (Quote-Arg $cat),
-        '-ProgressFile', (Quote-Arg $progressFile)
+        '-ProgressFile', (Quote-Arg $progressFile),
+        '-LogFile', (Quote-Arg $script:LogFile)
     )
     Write-TraceLog "[GUI] Lancement du processus isole : powershell $($procArgs -join ' ')" -Color 'Cyan'
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $procArgs -PassThru -WindowStyle Hidden
