@@ -47,7 +47,7 @@ Write-TraceLog '--- Verification des prerequis ---' -Color 'Cyan'
 try {
     $req = Test-CdRepositoryRequirements
     foreach ($r in $req.Results) {
-        Write-TraceLog ("{0} {1} : {2}" -f $(if ($r.Ok) {'[OK]  '} else {'[ECHEC]'}), $r.Check, $r.Detail)) -Color $(if ($r.Ok) {'Green'} else {'Red'})
+        Write-TraceLog ("{0} {1} : {2}" -f $(if ($r.Ok) {'[OK]  '} else {'[ECHEC]'}), $r.Check, $r.Detail) -Color $(if ($r.Ok) {'Green'} else {'Red'})
     }
     if (-not $req.WmpCom) {
         Write-TraceLog 'ATTENTION : Windows Media Player est absent ou non pilotable - le rip des CD audio echouera. Les CD de données continueront de fonctionner.' -Color 'Red'
