@@ -406,7 +406,7 @@ namespace CdRepo {
 
     [ComImport]
     [Guid("56E2294F-69ED-4629-A869-AEA72C0DCC2C")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [InterfaceType(ComInterfaceType.InterfaceIsDual)]
     public interface IWMPCdromRip {
         void startRip();
         void stopRip();
