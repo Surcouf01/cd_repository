@@ -209,12 +209,39 @@ function Test-CdRepositoryRequirements {
         Write-ModuleTrace ("Prerequis '{0}' : {1} - {2}" -f $Name, $(if ($Ok) {'OK'} else {'ECHEC'}), $Detail)
     }
 
-    $wmpPaths = @(
+    $wmpPaths = @()
+    $wmpFoundVia = ''
+    try {
+        $clsid = (Get-ItemProperty -Path 'Registry::HKEY_CLASSES_ROOT\WMPlayer.OCX.7\CLSID' -ErrorAction Stop).'(default)'
+        if ($clsid) {
+            $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue).'(default)'
+            if (-not $server) {
+                $server = (Get-ItemProperty -Path "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\LocalServer32" -ErrorAction SilentlyContinue).'(default)'
+            }
+            if ($server) {
+                $server = [Environment]::ExpandEnvironmentVariables($server.Trim('"'))
+                if (Test-Path $server) { $wmpPaths += $server; $wmpFoundVia = 'registre COM' }
+            }
+        }
+    } catch { }
+    $system32 = [Environment]::GetFolderPath('System')
+    $sysWow64 = Join-Path ([Environment]::GetFolderPath('SystemX86')) ''
+    if (-not $sysWow64 -or $sysWow64 -eq '\') { $sysWow64 = Join-Path $env:SystemRoot 'SysWOW64' }
+    $wmpPaths += @(
+        (Join-Path $system32 'wmp.dll'),
+        (Join-Path $env:SystemRoot 'SysWOW64\wmp.dll'),
+        (Join-Path $system32 'wmp.dll'),
         (Join-Path $env:ProgramFiles 'Windows Media Player\wmp.dll'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Windows Media Player\wmp.dll')
+        (Join-Path ${env:ProgramFiles(x86)} 'Windows Media Player\wmp.dll'),
+        (Join-Path $env:ProgramFiles 'Windows Media Player\wmp.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Windows Media Player\wmp.exe')
     )
-    $wmpDll = $wmpPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-    Add-Result 'Windows Media Player (wmp.dll)' ([bool]$wmpDll) $(if ($wmpDll) { "present : $wmpDll" } else { 'introuvable - installez : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player' })
+    $wmpDll = $null
+    foreach ($p in $wmpPaths) {
+        if ($p -and (Test-Path $p)) { $wmpDll = $p; break }
+    }
+    if ($wmpDll -and -not $wmpFoundVia) { $wmpFoundVia = 'chemins systeme' }
+    Add-Result 'Windows Media Player' ([bool]$wmpDll) $(if ($wmpDll) { "present ($wmpFoundVia) : $wmpDll" } else { 'introuvable (registre COM, System32, Program Files) - installez : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player' })
 
     $wmpCom = $false
     $wmpComDetail = ''
