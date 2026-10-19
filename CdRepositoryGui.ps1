@@ -456,7 +456,11 @@ $controls['BtnRip'].Add_Click({
                 $out = $script:CopyPs.EndInvoke($script:CopyResult)
                 $errs = @($script:CopyPs.Streams.Error.ReadAll())
                 if ($errs.Count -gt 0) {
-                    Set-Status "Erreur : $($errs[0].Exception.Message)" -Error
+                    $errMsg = $errs[0].Exception.Message
+                    Set-Status "Erreur : $errMsg" -Error
+                    [System.Windows.MessageBox]::Show(
+                        "La copie a echoue :`n`n$errMsg",
+                        'Erreur de copie', 'OK', 'Error') | Out-Null
                 } else {
                     $iso = ($out | Select-Object -Last 1)
                     $warns = @($script:CopyPs.Streams.Warning.ReadAll())

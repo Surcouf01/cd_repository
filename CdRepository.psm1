@@ -34,7 +34,13 @@ function Get-CdIndex {
     param([string]$Path = $script:IndexFile)
     if (-not $Path) { throw "Configuration non chargee : appelez Import-CdConfig d'abord." }
     New-CdIndex -Path $Path
-    return (Get-Content $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
+    $json = Get-Content $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $disks = @()
+    if ($null -ne $json.disks) {
+        if ($json.disks -is [array]) { $disks = $json.disks }
+        else { $disks = @($json.disks) }
+    }
+    return [pscustomobject]@{ version = $json.version; disks = $disks }
 }
 
 function Save-CdIndex {
@@ -178,7 +184,9 @@ function Copy-CdToRepository {
     $src = "${drive}:"
     $vol = (Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue)
     if (-not $vol) { throw "Lettre de lecteur invalide ou non presente : $drive" }
-    if (-not (Get-PSDrive $drive -ErrorAction SilentlyContinue)) { throw "Aucun disque present dans le lecteur $drive" }
+    if (-not (Get-PSDrive $drive -ErrorAction SilentlyContinue)) {
+        throw "Aucun disque present dans le lecteur $drive. Si c'est un CD AUDIO (pistes CDDA), il n'a pas de systeme de fichiers : utilisez un ripper dedie (ex. Exact Audio Copy) puis importez les fichiers resultant."
+    }
 
     $catDir = Join-Path $root (Get-MediaCategory $Category)
     if (-not (Test-Path $catDir)) { New-Item -ItemType Directory -Path $catDir -Force | Out-Null }
@@ -277,9 +285,13 @@ function Copy-CdToRepository {
                 contents    = $contents
                 readErrors  = @($readErrors)
             }
-            $index.disks += $entry
-            Save-CdIndex -Index $index
-            Write-Host "Index mis a jour."
+            $newDisks = @($index.disks) + @($entry)
+            Save-CdIndex -Index ([pscustomobject]@{ version = 1; disks = $newDisks })
+            $check = Get-CdIndex
+            if (@($check.disks | Where-Object { $_.id -eq $entry.id }).Count -eq 0) {
+                throw "Echec de l ecriture de l index : verification post-ecriture negative."
+            }
+            Write-Host "Index mis a jour : $($check.disks.Count) disque(s)."
         }
     }
     finally {
