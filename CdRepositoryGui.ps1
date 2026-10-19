@@ -43,6 +43,9 @@ function Write-TraceLog {
 
 Write-TraceLog "=== Demarrage du GUI -VerboseErrors=$script:VerboseErrors ===" -Color 'Cyan'
 
+Import-Module (Join-Path $here 'CdRepository.psd1') -Force
+Write-TraceLog "Module importe."
+
 Write-TraceLog '--- Verification des prerequis ---' -Color 'Cyan'
 try {
     $req = Test-CdRepositoryRequirements
@@ -68,7 +71,6 @@ trap {
     continue
 }
 
-Import-Module (Join-Path $here 'CdRepository.psd1') -Force
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
