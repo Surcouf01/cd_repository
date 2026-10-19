@@ -188,6 +188,13 @@ function Update-CopyProgress {
     if ($script:OverlayWindow) {
         $script:OverlayPb.Value = [Math]::Min(100, [Math]::Max(0, $Percent))
         $script:OverlayLbl.Text = "$Percent % - $Detail"
+        if ($Detail -match 'erreur\(s\)') {
+            $script:OverlayLbl.Foreground = '#D97706'
+            $script:OverlayFile.Foreground = '#D97706'
+        } else {
+            $script:OverlayLbl.Foreground = '#555'
+            $script:OverlayFile.Foreground = '#777'
+        }
         if ($FileName) { $script:OverlayFile.Text = $FileName }
         elseif ($script:OverlayPb.Value -lt 70) { $script:OverlayFile.Text = '' }
         $elapsed = ([datetime]::Now - $script:CopyStart)
@@ -437,7 +444,16 @@ $controls['BtnRip'].Add_Click({
                     Set-Status "Erreur : $($errs[0].Exception.Message)" -Error
                 } else {
                     $iso = ($out | Select-Object -Last 1)
-                    Set-Status "Copie terminee : $iso"
+                    $warns = @($script:CopyPs.Streams.Warning.ReadAll())
+                    if ($warns.Count -gt 0) {
+                        $warnMsg = ($warns | ForEach-Object { $_.Message }) -join ' | '
+                        Set-Status "Copie terminee avec avertissements : $warnMsg"
+                        [System.Windows.MessageBox]::Show(
+                            "La copie s'est terminee, mais des erreurs de lecture sont survenues :`n`n$warnMsg`n`nLes fichiers concernes ont ete exclus de l'ISO.",
+                            'Copie terminee avec avertissements', 'OK', 'Warning') | Out-Null
+                    } else {
+                        Set-Status "Copie terminee : $iso"
+                    }
                 }
             }
             catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }

@@ -196,8 +196,9 @@ function Copy-CdToRepository {
     try {
         Write-Host "Copie locale du contenu du disque ($src -> $tempRoot)..."
         if ($ProgressCallback) { & $ProgressCallback 0 'Lecture de la structure du disque...' }
-        $allFiles = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -File -ErrorAction SilentlyContinue)
-        if ($allFiles.Count -eq 0) { throw "Le disque dans $src est vide ou illisible." }
+        $enumErrs = @()
+        $allFiles = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -File -ErrorVariable enumErrs -ErrorAction SilentlyContinue)
+        if ($allFiles.Count -eq 0 -and $enumErrs.Count -eq 0) { throw "Le disque dans $src est vide ou illisible." }
         $allDirs = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -Directory -ErrorAction SilentlyContinue)
         foreach ($d in $allDirs) {
             $dest = Join-Path $tempRoot $d.FullName.Substring($srcRoot.Length)
@@ -207,13 +208,44 @@ function Copy-CdToRepository {
         if (-not $totalBytes) { $totalBytes = 0 }
         if ($ProgressCallback) { & $ProgressCallback 1 "Structure lue : $($allFiles.Count) fichier(s), $([math]::Round($totalBytes/1MB,1)) Mo" }
         $copied = 0; $n = 0
+        $readErrors = New-Object System.Collections.ArrayList
         foreach ($f in $allFiles) {
-            Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $tempRoot $f.FullName.Substring($srcRoot.Length)) -Force
-            $copied += $f.Length; $n++
+            $destPath = Join-Path $tempRoot $f.FullName.Substring($srcRoot.Length)
+            $copiedOk = $false
+            for ($try = 1; $try -le 3 -and -not $copiedOk; $try++) {
+                try {
+                    Copy-Item -LiteralPath $f.FullName -Destination $destPath -Force -ErrorAction Stop
+                    $copiedOk = $true
+                }
+                catch {
+                    if (Test-Path $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue }
+                    if ($try -lt 3) {
+                        if ($ProgressCallback) { & $ProgressCallback ([int](70*$copied/[Math]::Max(1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
+                        Start-Sleep -Milliseconds 800
+                    }
+                }
+            }
+            if (-not $copiedOk) {
+                [void]$readErrors.Add([pscustomobject]@{ file = $f.FullName; error = "illisible apres 3 essais" })
+                Write-Warning "Erreur de lecture : $($f.FullName) - fichier ignore"
+            } else {
+                $copied += $f.Length
+            }
+            $n++
             if ($ProgressCallback -and $totalBytes -gt 0) {
                 $pct = [int](70 * $copied / $totalBytes)
-                & $ProgressCallback $pct ("Copie : $($f.Name) ($n/$($allFiles.Count))")
+                $suffix = if ($readErrors.Count -gt 0) { " [$($readErrors.Count) erreur(s)]" } else { '' }
+                & $ProgressCallback $pct ("Copie : $($f.Name) ($n/$($allFiles.Count))$suffix")
             }
+        }
+        if ($enumErrs.Count -gt 0) {
+            foreach ($e in $enumErrs) {
+                [void]$readErrors.Add([pscustomobject]@{ file = $e.TargetObject; error = $e.Exception.Message })
+            }
+        }
+        if ($readErrors.Count -gt 0) {
+            Write-Warning "$($readErrors.Count) erreur(s) de lecture : $($readErrors.Count) fichier(s) exclus de l'ISO."
+            if ($ProgressCallback) { & $ProgressCallback 70 "Copie terminee avec $($readErrors.Count) erreur(s) de lecture" }
         }
         if ($ProgressCallback) { & $ProgressCallback 70 'Preparation de l image ISO...' }
 
@@ -243,6 +275,7 @@ function Copy-CdToRepository {
                 addedUtc    = (Get-Date).ToUniversalTime().ToString('o')
                 sourceLabel = $vol.FileSystemLabel
                 contents    = $contents
+                readErrors  = @($readErrors)
             }
             $index.disks += $entry
             Save-CdIndex -Index $index
