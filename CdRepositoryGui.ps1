@@ -691,8 +691,11 @@ $controls['BtnRip'].Add_Click({
         '-ProgressFile', (Quote-Arg $progressFile),
         '-LogFile', (Quote-Arg $jobLog)
     )
-    Write-TraceLog "[GUI] Lancement du processus isole : powershell $($procArgs -join ' ')" -Color 'Cyan'
-    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $procArgs -PassThru -WindowStyle Hidden
+    $psExe = 'powershell.exe'
+    $psWow64 = Join-Path $env:SystemRoot 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
+    if (Test-Path $psWow64) { $psExe = $psWow64 }
+    Write-TraceLog "[GUI] Lancement du processus isole (32 bits pour WMP) : $psExe $($procArgs -join ' ')" -Color 'Cyan'
+    $proc = Start-Process -FilePath $psExe -ArgumentList $procArgs -PassThru -WindowStyle Hidden
     $script:CopyProc = $proc
     Write-TraceLog "[GUI] Processus de copie lance (PID $($proc.Id))."
 

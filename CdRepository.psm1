@@ -437,9 +437,8 @@ namespace CdRepo {
         }
 
         public static WmpRipRaw Bind(object cdrom, string wmpPath, string logFile) {
-            if (IntPtr.Size == 4) {
-                throw new Exception("Architecture 32 bits non supportee pour l appel vtable brut (thiscall).");
-            }
+            Log(logFile, "Architecture : " + (IntPtr.Size == 8 ? "64 bits" : "32 bits") + ".");
+
             ITypeLib tlb;
             LoadTypeLibEx(wmpPath, 2, out tlb);
             int count = tlb.GetTypeInfoCount();
