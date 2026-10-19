@@ -393,21 +393,27 @@ using System;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace CdRepo {
+    public class TlbSink : ITypeLibImporterNotify {
+        public void ReportEvent(ImporterEventKind eventKind, int eventCode, string eventMsg) { }
+        public Assembly ResolveRef(object typeLib) { return null; }
+    }
+
     public class WmpInteropGen {
         [DllImport("oleaut32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
-        private static extern void LoadTypeLibEx(string strTypeLibName, RegKind regKind, out System.Runtime.InteropServices.ComTypes.ITypeLib typeLib);
+        private static extern void LoadTypeLibEx(string strTypeLibName, RegKind regKind, out ITypeLib typeLib);
 
         private enum RegKind { Default = 0, Register = 1, None = 2 }
 
         public static string Generate(string wmpDllPath, string outputDir) {
-            System.Runtime.InteropServices.ComTypes.ITypeLib tlb;
+            ITypeLib tlb;
             LoadTypeLibEx(wmpDllPath, RegKind.None, out tlb);
             string outPath = System.IO.Path.Combine(outputDir, "WMPLib.Interop.dll");
             TypeLibConverter converter = new TypeLibConverter();
             AssemblyBuilder ab = converter.ConvertTypeLibToAssembly(
-                tlb, outPath, TypeLibImporterFlags.None, null, new string[] { "WMPLib" }, null);
+                tlb, outPath, TypeLibImporterFlags.None, new TlbSink(), null, null);
             return outPath;
         }
     }
