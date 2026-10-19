@@ -120,7 +120,7 @@ function Show-CopyOverlay {
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" HorizontalAlignment="Center" FontSize="15" FontWeight="Bold"
-                   Text="Copie du CD en cours..."/>
+                   x:Name="LblTitle" Text="Copie du CD en cours..."/>
         <Canvas Grid.Row="1" x:Name="Cvs" Height="90">
             <Grid x:Name="FolderLeft" Canvas.Left="10" Canvas.Top="15" Width="80">
                 <Path Data="M 0,8 L 8,0 L 60,0 L 60,10 L 76,10 L 76,42 L 0,42 Z"
@@ -141,7 +141,10 @@ function Show-CopyOverlay {
             </Grid>
         </Canvas>
         <ProgressBar Grid.Row="2" x:Name="PbPercent" Height="20" Margin="20,0" Maximum="100" Minimum="0"/>
-        <TextBlock Grid.Row="3" x:Name="LblDetail" HorizontalAlignment="Center" Margin="0,8,0,0" Foreground="#555"/>
+        <StackPanel Grid.Row="3" Margin="0,8,0,0">
+            <TextBlock x:Name="LblDetail" HorizontalAlignment="Center" Foreground="#555" FontWeight="Bold" Text="Demarrage..."/>
+            <TextBlock x:Name="LblFile" HorizontalAlignment="Center" Foreground="#777" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" MaxWidth="460" Text=""/>
+        </StackPanel>
     </Grid>
 </Window>
 '@
@@ -149,7 +152,10 @@ function Show-CopyOverlay {
     $script:OverlayCvs    = $script:OverlayWindow.FindName('Cvs')
     $script:OverlayPb     = $script:OverlayWindow.FindName('PbPercent')
     $script:OverlayLbl    = $script:OverlayWindow.FindName('LblDetail')
+    $script:OverlayFile   = $script:OverlayWindow.FindName('LblFile')
+    $script:OverlayTitle  = $script:OverlayWindow.FindName('LblTitle')
     $script:OverlayLeaf   = $script:OverlayWindow.FindName('Leaf')
+    $script:CopyStart     = [datetime]::Now
     $null = $script:OverlayWindow.FindName('LblSource').Text = "${SourceLetter}"
     $null = $script:OverlayWindow.FindName('LblDest').Text = 'NAS'
 
@@ -178,10 +184,14 @@ function Show-CopyOverlay {
 }
 
 function Update-CopyProgress {
-    param([int]$Percent, [string]$Detail)
+    param([int]$Percent, [string]$Detail, [string]$FileName = '')
     if ($script:OverlayWindow) {
         $script:OverlayPb.Value = [Math]::Min(100, [Math]::Max(0, $Percent))
         $script:OverlayLbl.Text = "$Percent % - $Detail"
+        if ($FileName) { $script:OverlayFile.Text = $FileName }
+        elseif ($script:OverlayPb.Value -lt 70) { $script:OverlayFile.Text = '' }
+        $elapsed = ([datetime]::Now - $script:CopyStart)
+        $script:OverlayTitle.Text = ('Copie en cours... {0:mm\:ss}' -f $elapsed)
     }
 }
 
@@ -410,7 +420,13 @@ $controls['BtnRip'].Add_Click({
         while ($uiQueue.Count -gt 0) {
             $item = $uiQueue[0]
             $uiQueue.RemoveAt(0)
-            Update-CopyProgress -Percent $item.Pct -Detail $item.Detail
+            $fileName = ''
+            $detail = [string]$item.Detail
+            if ($detail -match '^Copie\s*:\s*(.+?)\s*\((\d+)/(\d+)\)$') {
+                $fileName = $Matches[1]
+                $detail = "Fichier $($Matches[2]) / $($Matches[3])"
+            }
+            Update-CopyProgress -Percent $item.Pct -Detail $detail -FileName $fileName
         }
         if ($script:CopyResult.IsCompleted) {
             $script:CopyTimer.Stop()

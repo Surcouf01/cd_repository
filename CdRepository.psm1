@@ -150,7 +150,9 @@ namespace CdRepo {
         $fsi.VolumeName = $VolumeLabel
         $fsi.FileSystemsToCreate = 3   # ISO9660 + Joliet
         $fsi.ChooseImageDefaultsForMediaType(12)  # CD ~650-700 Mo
+        if ($ProgressCallback) { & $ProgressCallback 72 'Analyse des fichiers pour l image ISO...' }
         $fsi.Root.AddTree((Resolve-Path $SourceDirectory).Path, $false)
+        if ($ProgressCallback) { & $ProgressCallback 78 'Generation du flux ISO...' }
         $result = $fsi.CreateResultImage()
         [CdRepo.IsoStream]::CopyStream($result.ImageStream, [System.IO.Path]::GetFullPath($DestinationIso), $action)
     }
@@ -193,6 +195,7 @@ function Copy-CdToRepository {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     try {
         Write-Host "Copie locale du contenu du disque ($src -> $tempRoot)..."
+        if ($ProgressCallback) { & $ProgressCallback 0 'Lecture de la structure du disque...' }
         $allFiles = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -File -ErrorAction SilentlyContinue)
         if ($allFiles.Count -eq 0) { throw "Le disque dans $src est vide ou illisible." }
         $allDirs = @(Get-ChildItem -LiteralPath $srcRoot -Recurse -Force -Directory -ErrorAction SilentlyContinue)
@@ -202,16 +205,17 @@ function Copy-CdToRepository {
         }
         $totalBytes = ($allFiles | Measure-Object Length -Sum).Sum
         if (-not $totalBytes) { $totalBytes = 0 }
+        if ($ProgressCallback) { & $ProgressCallback 1 "Structure lue : $($allFiles.Count) fichier(s), $([math]::Round($totalBytes/1MB,1)) Mo" }
         $copied = 0; $n = 0
         foreach ($f in $allFiles) {
             Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $tempRoot $f.FullName.Substring($srcRoot.Length)) -Force
             $copied += $f.Length; $n++
             if ($ProgressCallback -and $totalBytes -gt 0) {
                 $pct = [int](70 * $copied / $totalBytes)
-                & $ProgressCallback $pct ("Copie des fichiers : $n / $($allFiles.Count)")
+                & $ProgressCallback $pct ("Copie : $($f.Name) ($n/$($allFiles.Count))")
             }
         }
-        if ($ProgressCallback) { & $ProgressCallback 70 'Creation de l''image ISO...' }
+        if ($ProgressCallback) { & $ProgressCallback 70 'Preparation de l image ISO...' }
 
         Write-Host "Creation de l'ISO : $isoPath"
         New-IsoImageFromDirectory -SourceDirectory $tempRoot -DestinationIso $isoPath -VolumeLabel ($safe -replace ' ','_') -ProgressCallback $ProgressCallback
