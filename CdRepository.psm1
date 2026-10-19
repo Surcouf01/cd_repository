@@ -504,20 +504,40 @@ function Copy-CdToRepository {
         [scriptblock]$ProgressCallback,
         [switch]$NoIndex
     )
-    Write-ModuleTrace "Copy-CdToRepository : demarrage (lecteur=$drive titre=$Title categorie=$Category)."
     $cfg = Import-CdConfig
     Write-ModuleTrace "Copy-CdToRepository : config chargee (racine=$($cfg.RepositoryRoot))."
     $root = $cfg.RepositoryRoot
     $drive = $DriveLetter.TrimEnd('\',':')
     $src = "${drive}:"
+    Write-ModuleTrace "Copy-CdToRepository : demarrage (lecteur=$drive titre=$Title categorie=$Category)."
     Write-ModuleTrace "Copy-CdToRepository : Get-Volume..."
     $vol = (Get-Volume -DriveLetter $drive -ErrorAction SilentlyContinue)
     Write-ModuleTrace "Copy-CdToRepository : Get-PSDrive..."
     $hasFileSystem = [bool](Get-PSDrive $drive -ErrorAction SilentlyContinue)
     Write-ModuleTrace "Copy-CdToRepository : systeme de fichiers present = $hasFileSystem."
+    $isAudio = $false
     if (-not $hasFileSystem) {
         $isAudio = Test-CdIsAudio -DriveLetter $drive
-        if ($isAudio) {
+        Write-ModuleTrace "Copy-CdToRepository : Test-CdIsAudio (sans systeme de fichiers) = $isAudio."
+    }
+    else {
+        $label = ''
+        if ($vol -and $vol.FileSystemLabel) { $label = "$($vol.FileSystemLabel)" }
+        Write-ModuleTrace "Copy-CdToRepository : label du volume = '$label'."
+        if ($label -match 'Audio CD') {
+            $isAudio = $true
+        }
+        else {
+            try {
+                $rootFiles = @(Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue | Select-Object -First 5)
+                $cdaCount = @($rootFiles | Where-Object { $_.Extension -eq '.cda' }).Count
+                Write-ModuleTrace "Copy-CdToRepository : $($rootFiles.Count) fichier(s) a la racine dont $cdaCount .cda."
+                if ($rootFiles.Count -gt 0 -and $cdaCount -eq $rootFiles.Count) { $isAudio = $true }
+            } catch { Write-ModuleTrace "Copy-CdToRepository : enumeration racine impossible : $($_.Exception.Message)" }
+        }
+        Write-ModuleTrace "Copy-CdToRepository : CD audio (label/.cda) = $isAudio."
+    }
+    if ($isAudio) {
             if ($ProgressCallback) { & $ProgressCallback 0 'CD audio detecte : extraction des pistes...' }
             $rippedFiles = @(Invoke-CdAudioRip -DriveLetter $drive -ProgressCallback $ProgressCallback)
             $catDir = Join-Path $root (Get-MediaCategory $Category)
@@ -566,9 +586,8 @@ function Copy-CdToRepository {
             Write-Host "OK : CD audio archive dans $destDir"
             Write-Output $destDir
             return
-        }
-        throw "Aucun disque present dans le lecteur $drive."
     }
+    if (-not $hasFileSystem) { throw "Aucun disque present dans le lecteur $drive." }
     if (-not $vol) { throw "Lettre de lecteur invalide ou non presente : $drive" }
 
     $catDir = Join-Path $root (Get-MediaCategory $Category)

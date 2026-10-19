@@ -579,8 +579,16 @@ $controls['BtnRip'].Add_Click({
     if (-not $hasFs) {
         try { $isAudio = Test-CdIsAudio -DriveLetter $letter } catch { $isAudio = $false }
     }
-    if (-not $hasFs) {
-        if ($isAudio -and -not $script:Requirements.WmpCom) {
+    else {
+        try {
+            $rootFiles = @(Get-ChildItem -LiteralPath "$($letter.TrimEnd(':', '\')):" -File -ErrorAction SilentlyContinue | Select-Object -First 5)
+            $cdaCount = @($rootFiles | Where-Object { $_.Extension -eq '.cda' }).Count
+            if ($rootFiles.Count -gt 0 -and $cdaCount -eq $rootFiles.Count) { $isAudio = $true }
+            $volTmp = Get-Volume -DriveLetter $letter.TrimEnd(':', '\') -ErrorAction SilentlyContinue
+            if ($volTmp -and "$($volTmp.FileSystemLabel)" -match 'Audio CD') { $isAudio = $true }
+        } catch { }
+    }
+    if ($isAudio -and -not $script:Requirements.WmpCom) {
             Set-Status 'Copie impossible : CD audio et Windows Media Player absent.' -Error
             [System.Windows.MessageBox]::Show(
                 "Ce CD audio ne peut pas etre copie : Windows Media Player est absent ou non pilotable.`n`nInstallation : Parametres > Applications > Fonctionnalites facultatives > Windows Media Player`nou (admin) : Add-WindowsCapability -Online -Name 'Media.WindowsMediaPlayer'`n`nLes CD de donnees ne sont pas concernes par cette limitation.",
