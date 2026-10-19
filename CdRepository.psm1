@@ -391,6 +391,7 @@ function Get-WmpInteropAssembly {
             Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.CustomMarshalers;
 using System.Reflection;
 using System.Reflection.Emit;
 
