@@ -412,6 +412,7 @@ function Get-CdDriveLetters {
 # --- Initialisation ---
 $null = Import-CdConfig
 $combo = $controls['CmbCategory']
+if (-not $combo) { throw "Initialisation impossible : controle CmbCategory introuvable (XAML charge partiellement ?)." }
 $combo.Items.Add('(toutes)') | Out-Null
 foreach ($c in (Get-CdCategories)) { $combo.Items.Add($c) | Out-Null }
 $combo.SelectedIndex = 0
@@ -910,7 +911,8 @@ $controls['BtnDelete'].Add_Click({
 
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
 
-$app = New-Object System.Windows.Application
+$app = [System.Windows.Application]::Current
+if (-not $app) { $app = New-Object System.Windows.Application }
 $app.Add_DispatcherUnhandledException({
     param($sender, $e)
     Write-ErrorLog -Context 'DISPATCHER' -Error $e.Exception
