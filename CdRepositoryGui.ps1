@@ -925,7 +925,6 @@ $window.Add_Loaded({
     [void]$window.Focus()
     [System.Windows.Input.Keyboard]::Focus($window)
 })
-$null = $window.Show()
 [void]$window.Activate()
 [void]$window.Focus()
 [void]$window.ShowDialog()
