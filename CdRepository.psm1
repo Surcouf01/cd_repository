@@ -983,9 +983,14 @@ function Invoke-CdAudioRip {
 
     $files = @()
     foreach ($p in $fileList -split '\|') {
-        if ($p -and (Test-Path $p)) { $files += Get-Item -LiteralPath $p }
+        if (-not $p) { continue }
+        if (Test-Path -LiteralPath $p) {
+            $files += Get-Item -LiteralPath $p
+        } else {
+            Write-ModuleTrace "Rip audio : chemin recu introuvable : [$p]"
+        }
     }
-    Write-ModuleTrace "Rip audio : $($files.Count) fichier(s) recus du sous-job 32 bits."
+    Write-ModuleTrace "Rip audio : $($files.Count) fichier(s) recus du sous-job 32 bits (liste brute : $fileList)."
     if ($files.Count -eq 0) {
         throw "Le rip n a produit aucun fichier exploitable. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
     }
