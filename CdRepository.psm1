@@ -1230,9 +1230,28 @@ function Mount-CdFromRepository {
     # aucun montage necessaire ni elevation. Verifie AVANT le chemin ISO :
     # un dossier existe bien (Test-Path true) mais n'est pas montable.
     if (Test-Path $iso -PathType Container) {
-        Write-Host "Conteneur audio : contenu disponible dans $iso (pas de montage necessaire)."
-        Start-Process "explorer.exe" $iso
-        return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
+        $free = @(Get-DriveLettersInUse -Allowed $cfg.DriveLetters)
+        if ($PreferredLetter) {
+            $p = $PreferredLetter.TrimEnd(':', '\')
+            if ($free -notcontains $p) { throw "Lettre '$p' non disponible (libres : $($free -join ', '))." }
+            $letter = $p
+        } else {
+            if ($free.Count -eq 0) { throw "Aucune lettre de lecteur disponible dans : $($cfg.DriveLetters)" }
+            $letter = $free[0]
+        }
+        $existing = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
+        if ($existing) { $letter = $existing[0].Substring(0,1) }
+        else { & subst "${letter}: $($iso.Replace('', '\'))" 2>$null }
+        $mapped = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
+        if (-not $mapped) {
+            Write-Host "Conteneur audio : mappage impossible, ouverture directe du dossier $iso"
+            Start-Process "explorer.exe" $iso
+            return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
+        }
+        $letter = $mapped[0].Substring(0,1)
+        Write-Host "Conteneur audio mappe sur ${letter}: ($iso)"
+        Start-Process "explorer.exe" ("${letter}:")
+        return [pscustomobject]@{ Letter = $letter; Image = $null; Id = $Id }
     }
     if (-not (Test-Path $iso)) {
         throw "Fichier ISO manquant : $iso"
@@ -1302,6 +1321,17 @@ function Dismount-CdFromRepository {
     if (-not $entry) { throw "Aucun disque avec l'id '$Id'." }
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
+    if (Test-Path $iso -PathType Container) {
+        $mapped = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
+        if ($mapped) {
+            $letter = $mapped[0].Substring(0,1)
+            & subst "${letter}: /d" 2>$null
+            Write-Host "Demonte : $($entry.title) (lettre ${letter}: liberee)"
+        } else {
+            Write-Host "Aucun mappage actif pour $($entry.title) (conteneur audio)."
+        }
+        return
+    }
     try {
         Dismount-DiskImage -ImagePath $iso | Out-Null
     } catch {
