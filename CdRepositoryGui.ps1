@@ -915,15 +915,19 @@ function Invoke-ElevatedCdOperation {
     $modulePath = Join-Path $here 'CdRepository.psd1'
     # Les valeurs sont interpolees directement dans le script encode :
     # -EncodedCommand ne transmet aucun argument au script.
+    $cmdName = $(if ($Operation -eq 'mount') { 'Mount-CdFromRepository' } else { 'Dismount-CdFromRepository' })
     $opScript = "
+        `$ErrorActionPreference = 'Stop'
         try {
-            Import-Module -Name '$modulePath' -Force
-            if ('$Operation' -eq 'mount') { `$r = Mount-CdFromRepository -Id '$Id' }
-            else { `$r = Dismount-CdFromRepository -Id '$Id' }
+            Import-Module -Name '$modulePath' -Force -ErrorAction Stop
+            if (-not (Get-Command -Name '$cmdName' -ErrorAction SilentlyContinue)) {
+                throw ('Import du module reussi mais $cmdName absent. Commandes exportees : ' + ((Get-Command -Module CdRepository -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', '))
+            }
+            `$r = $cmdName -Id '$Id'
             @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
         }
         catch {
-            @{ ok = `$false; error = `$_.Exception.Message } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+            @{ ok = `$false; error = (`$_.Exception.Message + ' [type: ' + `$_.Exception.GetType().Name + ']') } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
         }"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript))
     $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand $encoded"
