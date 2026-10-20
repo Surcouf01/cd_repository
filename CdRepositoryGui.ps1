@@ -708,8 +708,13 @@ $controls['BtnRip'].Add_Click({
     $timer = New-Object System.Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(300)
     $script:CopyTimer = $timer
+    $script:CopyHeartbeat = 0
     $timer.Add_Tick({
         if ($script:CopyDone) { $script:CopyTimer.Stop(); return }
+        $script:CopyHeartbeat++
+        if ($script:CopyHeartbeat % 20 -eq 0) {
+            try { Add-Content -Path (Join-Path $env:TEMP 'CdRepositoryGui.log') -Value "[GUI] Heartbeat copie en cours (${script:CopyHeartbeat} ticks) - $(Get-Date -Format 'HH:mm:ss')" -Encoding UTF8 } catch { }
+        }
         try {
 
         if ($script:JobLogPath -and (Test-Path $script:JobLogPath)) {
