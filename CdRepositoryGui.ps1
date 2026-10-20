@@ -911,9 +911,8 @@ $controls['BtnDelete'].Add_Click({
 
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
 
-$app = [System.Windows.Application]::Current
-if (-not $app) { $app = New-Object System.Windows.Application }
-$app.Add_DispatcherUnhandledException({
+$dispatcher = [System.Windows.Threading.Dispatcher]::CurrentDispatcher
+$dispatcher.Add_UnhandledException({
     param($sender, $e)
     Write-ErrorLog -Context 'DISPATCHER' -Error $e.Exception
     [System.Windows.MessageBox]::Show(
@@ -929,4 +928,4 @@ $window.Add_Loaded({
 $null = $window.Show()
 [void]$window.Activate()
 [void]$window.Focus()
-[void]$app.Run()
+[void]$window.ShowDialog()
