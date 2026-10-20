@@ -727,15 +727,28 @@ function Invoke-CdAudioRipInternal {
                     $lib = $wmp.mediaCollection.getByAlbum($albumTitle)
                     $libCount = 0
                     if ($lib) { $libCount = $lib.count }
-                    Write-ModuleTrace "Rip audio : $libCount piste(s) dans la bibliotheque WMP pour cet album."
+                    Write-ModuleTrace "Rip audio : $libCount piste(s) dans la bibliotheque WMP pour '$albumTitle'."
                     $exts = @('.wma','.mp3','.wav','.m4a','.flac')
                     for ($i = 0; $i -lt $libCount; $i++) {
                         $u = $lib.item($i).sourceURL
                         if ($u -and (Test-Path -LiteralPath $u)) {
                             $f = Get-Item -LiteralPath $u
                             if ($exts -contains $f.Extension.ToLower()) { $libFiles += $f }
-                        } else {
-                            Write-ModuleTrace "Rip audio : piste bibliotheque $i introuvable sur le disque ($u)."
+                        }
+                    }
+                    if ($libFiles.Count -eq 0) {
+                        Write-ModuleTrace 'Rip audio : album introuvable par titre ; balayage de la bibliotheque audio WMP par date de fichier...'
+                        $allAudio = $wmp.mediaCollection.getByAttribute('MediaType', 'audio')
+                        $allCount = 0
+                        if ($allAudio) { $allCount = $allAudio.count }
+                        Write-ModuleTrace "Rip audio : $allAudio.Count piste(s) audio au total."
+                        for ($i = 0; $i -lt $allCount; $i++) {
+                            $u = $allAudio.item($i).sourceURL
+                            if (-not $u -or -not (Test-Path -LiteralPath $u)) { continue }
+                            $f = Get-Item -LiteralPath $u
+                            if ($exts -contains $f.Extension.ToLower() -and $f.LastWriteTime -ge $ripStart.AddSeconds(-5)) {
+                                $libFiles += $f
+                            }
                         }
                     }
                 }
