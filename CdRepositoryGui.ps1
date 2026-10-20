@@ -860,14 +860,54 @@ $controls['BtnRip'].Add_Click({
     $timer.Start()
 })
 
+function Test-GuiAdmin {
+    try {
+        return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+function Invoke-ElevatedCdOperation {
+    param([string]$Operation, [string]$Id)
+    $opScript = {
+        param($Operation, $Id, $ModulePath, $ResultPath)
+        try {
+            Import-Module $ModulePath -Force
+            if ($Operation -eq 'mount') { $r = Mount-CdFromRepository -Id $Id }
+            else { $r = Dismount-CdFromRepository -Id $Id }
+            @{ ok = $true; letter = $(if ($r -and $r.Letter) { [string]$r.Letter } else { '' }) } | ConvertTo-Json | Set-Content -Path $ResultPath -Encoding UTF8
+        }
+        catch {
+            @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json | Set-Content -Path $ResultPath -Encoding UTF8
+        }
+    }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript.ToString()))
+    $resultPath = Join-Path $env:TEMP ("cdrepo_elev_result_" + [guid]::NewGuid().ToString('N') + '.json')
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    $modulePath = Join-Path $here 'CdRepository.psd1'
+    $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs -PassThru -WindowStyle Hidden -Wait
+    if (-not (Test-Path $resultPath)) {
+        throw "L operation a ete annulee (elevation refusee) ou n a pas produit de resultat (code : $($proc.ExitCode))."
+    }
+    return (Get-Content -Path $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
+
 $controls['BtnMount'].Add_Click({
     $sel = Get-SelectedDisk
     if (-not $sel) { return }
     Wait-Cursor {
         try {
-            $m = Mount-CdFromRepository -Id $sel.Id
+            $m = $null
+            if (Test-GuiAdmin) {
+                $m = Mount-CdFromRepository -Id $sel.Id
+            } else {
+                Set-Status 'Elevation des droits demandee (montage ISO)...'
+                $r = Invoke-ElevatedCdOperation -Operation 'mount' -Id $sel.Id
+                if (-not $r.ok) { throw $r.error }
+                $m = [pscustomobject]@{ Letter = $r.letter }
+            }
             Set-Status "Monte sur $($m.Letter): . Ouverture de l'Explorateur..."
-            Start-Process "explorer.exe" ("$($m.Letter):\")
+            if ($m.Letter) { Start-Process "explorer.exe" ("$($m.Letter):\") }
         }
         catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
     }
@@ -878,7 +918,13 @@ $controls['BtnDismount'].Add_Click({
     if (-not $sel) { return }
     Wait-Cursor {
         try {
-            Dismount-CdFromRepository -Id $sel.Id
+            if (Test-GuiAdmin) {
+                Dismount-CdFromRepository -Id $sel.Id
+            } else {
+                Set-Status 'Elevation des droits demandee (demontage ISO)...'
+                $r = Invoke-ElevatedCdOperation -Operation 'dismount' -Id $sel.Id
+                if (-not $r.ok) { throw $r.error }
+            }
             Set-Status "Demonte : $($sel.Title)"
         }
         catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
