@@ -862,16 +862,44 @@ $controls['BtnMove'].Add_Click({
 $controls['BtnDelete'].Add_Click({
     $sel = Get-SelectedDisk
     if (-not $sel) { return }
+    if ($script:Busy) { Set-Status 'Une operation est deja en cours (copie). Attendez la fin avant de supprimer.' -Error; return }
     $confirm = [System.Windows.MessageBox]::Show(
         "Supprimer '$($sel.Title)' (fichier ISO + entree d'index) ?", 'Confirmation', 'YesNo', 'Warning')
     if ($confirm -ne 'Yes') { return }
-    Wait-Cursor {
+    $delId = $sel.Id
+    $delTitle = $sel.Title
+    $script:Busy = $true
+    $window.Cursor = 'Wait'
+    $delRunspace = [runspacefactory]::CreateRunspace()
+    $delRunspace.Open()
+    $delPs = [powershell]::Create()
+    $delPs.Runspace = $delRunspace
+    $delModule = Join-Path $here 'CdRepository.psd1'
+    $null = $delPs.AddScript({
+        param($ModulePath, $Id)
+        Import-Module $ModulePath -Force
+        Remove-CdFromRepository -Id $Id
+    }).AddArgument($delModule).AddArgument($delId)
+    $delAsync = $delPs.BeginInvoke()
+    $delTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $delTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+    $delTimer.Add_Tick({
+        if (-not $delAsync.IsCompleted) { return }
+        $delTimer.Stop()
         try {
-            Remove-CdFromRepository -Id $sel.Id
-            Update-DiskGrid
+            $null = $delPs.EndInvoke($delAsync)
+            Set-Status "Disque supprime : $delTitle"
         }
         catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
-    }
+        finally {
+            $delPs.Dispose()
+            $delRunspace.Dispose()
+            $window.Cursor = 'Arrow'
+            $script:Busy = $false
+            Update-DiskGrid
+        }
+    })
+    $delTimer.Start()
 })
 
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
