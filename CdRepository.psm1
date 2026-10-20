@@ -1239,18 +1239,38 @@ function Mount-CdFromRepository {
             if ($free.Count -eq 0) { throw "Aucune lettre de lecteur disponible dans : $($cfg.DriveLetters)" }
             $letter = $free[0]
         }
-        $existing = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
-        if ($existing) { $letter = $existing[0].Substring(0,1) }
-        else { & subst "${letter}: $($iso.Replace('', '\'))" 2>$null }
-        $mapped = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
+        # subst ne mappe que des chemins locaux ; un UNC reseau exige net use.
+        $isUnc = $iso -match '^\\\\[^\\]+\\'
+        $existing = $null
+        if (-not $isUnc) {
+            $existing = (& subst 2>$null | Where-Object { $_ -match ("^(\w+):\s+" + [regex]::Escape($iso) + '$') })
+        } else {
+            $existing = (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayRoot -and $_.DisplayRoot -eq $iso } | Select-Object -First 1)
+        }
+        if ($existing) {
+            if ($isUnc) { $letter = [string]$existing.Name } else { $letter = $existing[0].Substring(0,1) }
+        } else {
+            if ($isUnc) {
+                $null = & net use "${letter}:" $iso 2>$null
+            } else {
+                & subst "${letter}: $iso" 2>$null
+            }
+        }
+        $mapped = $null
+        if ($isUnc) {
+            $mapped = (Get-PSDrive -Name $letter -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayRoot -and $_.DisplayRoot -eq $iso })
+        } else {
+            $mapped = (& subst 2>$null | Where-Object { $_ -match ("^(\w+):\s+" + [regex]::Escape($iso) + '$') })
+        }
         if (-not $mapped) {
             Write-Host "Conteneur audio : mappage impossible, ouverture directe du dossier $iso"
             Start-Process "explorer.exe" $iso
             return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
         }
-        $letter = $mapped[0].Substring(0,1)
         Write-Host "Conteneur audio mappe sur ${letter}: ($iso)"
-        Start-Process "explorer.exe" ("${letter}:")
+        Start-Process "explorer.exe" ("${letter}:\")
         return [pscustomobject]@{ Letter = $letter; Image = $null; Id = $Id }
     }
     if (-not (Test-Path $iso)) {
@@ -1322,10 +1342,19 @@ function Dismount-CdFromRepository {
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
     if (Test-Path $iso -PathType Container) {
-        $mapped = & subst 2>$null | Where-Object { $_ -match "^(\w+):\s+\\?$([regex]::Escape($iso))" }
-        if ($mapped) {
-            $letter = $mapped[0].Substring(0,1)
-            & subst "${letter}: /d" 2>$null
+        $isUnc = $iso -match '^\\\\[^\\]+\\'
+        $letter = $null
+        if ($isUnc) {
+            $mapped = Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayRoot -and $_.DisplayRoot -eq $iso } | Select-Object -First 1
+            if ($mapped) { $letter = [string]$mapped.Name }
+        } else {
+            $mapped = & subst 2>$null | Where-Object { $_ -match ("^(\w+):\s+" + [regex]::Escape($iso) + '$') }
+            if ($mapped) { $letter = $mapped[0].Substring(0,1) }
+        }
+        if ($letter) {
+            if ($isUnc) { $null = & net use "${letter}:" /delete 2>$null }
+            else { & subst "${letter}: /d" 2>$null }
             Write-Host "Demonte : $($entry.title) (lettre ${letter}: liberee)"
         } else {
             Write-Host "Aucun mappage actif pour $($entry.title) (conteneur audio)."
