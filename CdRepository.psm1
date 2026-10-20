@@ -564,7 +564,7 @@ namespace CdRepo {
         $cp.CompilerOptions = '/platform:AnyCPU'
         Add-Type -TypeDefinition $srcRip -CompilerParameters $cp
         $null = [Reflection.Assembly]::LoadFrom($binderDll)
-        Write-ModuleTrace 'Rip audio : binder v2 compile vers $binderDll et charge.'
+        Write-ModuleTrace "Rip audio : binder v2 compile vers $binderDll et charge."
     }
 }
 
@@ -717,7 +717,10 @@ function Invoke-CdAudioRip {
                  '-ProgressFile', (Quote-RipArg $ripProgress),
                  '-LogFile', (Quote-RipArg $ripLog))
     Write-ModuleTrace "Rip audio : lancement du sous-job 32 bits..."
-    $proc = Start-Process -FilePath $ps32 -ArgumentList $ripArgs -PassThru -WindowStyle Hidden
+    $ripStdOut = Join-Path $dir 'cdrepo_rip_stdout.txt'
+    $ripStdErr = Join-Path $dir 'cdrepo_rip_stderr.txt'
+    Remove-Item -LiteralPath $ripStdOut, $ripStdErr -Force -ErrorAction SilentlyContinue
+    $proc = Start-Process -FilePath $ps32 -ArgumentList $ripArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $ripStdOut -RedirectStandardError $ripStdErr
     Write-ModuleTrace "Rip audio : sous-job lance (PID $($proc.Id))."
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -761,7 +764,13 @@ function Invoke-CdAudioRip {
             if (-not $done) {
                 $code = -1
                 try { $code = $proc.ExitCode } catch { }
-                throw "Le sous-job de rip s est arrete brutalement (code $code) sans signal. Consultez le log ([RIP32])."
+                $stderrTail = ''
+                try {
+                    if (Test-Path $ripStdErr) {
+                        $stderrTail = ([System.IO.File]::ReadAllLines($ripStdErr) | Select-Object -Last 15) -join ' | '
+                    }
+                } catch { }
+                throw "Le sous-job de rip s est arrete brutalement (code $code) sans signal. stderr: $stderrTail"
             }
         }
         if ((Get-Date) -gt $deadline) {
