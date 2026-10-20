@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo === Lancement GUI avec surveillance du processus ===
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0CdRepositoryGui.ps1"
 echo === GUI termine - code de sortie : %ERRORLEVEL% ===
