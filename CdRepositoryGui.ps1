@@ -898,6 +898,8 @@ $controls['BtnRip'].Add_Click({
     $timer.Start()
 })
 
+$script:MountedIsoPaths = @{}
+
 function Test-GuiAdmin {
     try {
         return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -929,6 +931,7 @@ function Invoke-ElevatedCdOperation {
                 if ((Test-Path $isoSrc) -and -not (Test-Path $isoSrc -PathType Container)) {
                     $localIso = Join-Path $sharedDir ('mount_' + [guid]::NewGuid().ToString('N') + '.iso')
                     Copy-Item -LiteralPath $isoSrc -Destination $localIso -Force
+                    $script:MountedIsoPaths[$sel.Id] = $localIso
                 }
             }
         } catch {
@@ -944,6 +947,11 @@ function Invoke-ElevatedCdOperation {
     # Les valeurs sont interpolees directement dans le script encode :
     # -EncodedCommand ne transmet aucun argument au script.
     $cmdName = $(if ($Operation -eq 'mount') { 'Mount-CdFromRepository' } else { 'Dismount-CdFromRepository' })
+    $memoPath = Join-Path (Join-Path $env:ProgramData 'cdrepo') 'mounted_paths.json'
+    $mountedMemo = @{}
+    try { if (Test-Path $memoPath) { $mountedMemo = Get-Content -Path $memoPath -Raw -Encoding UTF8 | ConvertFrom-Json } } catch { }
+    $memoIso = $null
+    try { $memoIso = $mountedMemo.$Id } catch { }
     $opScript = "
         `$ErrorActionPreference = 'Stop'
         `$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -957,8 +965,24 @@ function Invoke-ElevatedCdOperation {
                 if ('$Operation' -eq 'mount' -and `$isoLocalPath -and (Test-Path `$isoLocalPath)) {
                     `$img = Mount-DiskImage -ImagePath `$isoLocalPath -PassThru -ErrorAction Stop
                     `$vol = Get-Volume -DiskImage `$img -ErrorAction SilentlyContinue
+                    `$memo = @{}
+                    try { if (Test-Path '$memoPath') { `$memo = Get-Content -Path '$memoPath' -Raw -Encoding UTF8 | ConvertFrom-Json } } catch { }
+                    `$memo | Add-Member -NotePropertyName '$Id' -NotePropertyValue `$isoLocalPath -Force
+                    `$memo | ConvertTo-Json | Set-Content -Path '$memoPath' -Encoding UTF8
                     @{ ok = `$true; letter = `$(if (`$vol -and `$vol.DriveLetter) { [string]`$vol.DriveLetter } else { '' }); admin = `$admin; note = 'monte depuis copie locale pre-elevee' } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
                     exit
+                }
+                if ('$Operation' -eq 'dismount' -and $(if ('$memoIso') { '$memoIso' } else { '' })) {
+                    if (Test-Path '$memoIso') {
+                        Dismount-DiskImage -ImagePath '$memoIso' -ErrorAction Stop | Out-Null
+                        Remove-Item -LiteralPath '$memoIso' -Force -ErrorAction SilentlyContinue
+                        `$memo = @{}
+                        try { if (Test-Path '$memoPath') { `$memo = Get-Content -Path '$memoPath' -Raw -Encoding UTF8 | ConvertFrom-Json } } catch { }
+                        if (`$memo.PSObject.Properties['$Id']) { `$memo.PSObject.Properties.Remove('$Id') }
+                        `$memo | ConvertTo-Json | Set-Content -Path '$memoPath' -Encoding UTF8
+                        @{ ok = `$true; letter = ''; admin = `$admin; note = 'demonte (copie locale) et copie supprimee' } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                        exit
+                    }
                 }
                 `$r = $cmdName -Id '$Id'
                 @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }); admin = `$admin } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
