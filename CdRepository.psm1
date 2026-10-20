@@ -1138,12 +1138,15 @@ function Copy-CdToRepository {
         foreach ($f in $allFiles) {
             $destPath = Join-Path $tempRoot $f.FullName.Substring($srcRoot.Length)
             $copiedOk = $false
+            $lastErr = $null
             for ($try = 1; $try -le 3 -and -not $copiedOk; $try++) {
                 try {
                     Copy-Item -LiteralPath $f.FullName -Destination $destPath -Force -ErrorAction Stop
                     $copiedOk = $true
                 }
                 catch {
+                    $lastErr = $_.Exception.Message
+                    Write-ModuleTrace "Copie locale : echec $try/3 pour $($f.Name) : $lastErr"
                     if (Test-Path $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue }
                     if ($try -lt 3) {
                         if ($ProgressCallback) { & $ProgressCallback ([int][math]::Floor(70.0 * $copied / [Math]::Max([long]1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
@@ -1152,7 +1155,7 @@ function Copy-CdToRepository {
                 }
             }
             if (-not $copiedOk) {
-                [void]$readErrors.Add([pscustomobject]@{ file = $f.FullName; error = "illisible apres 3 essais" })
+                [void]$readErrors.Add([pscustomobject]@{ file = $f.FullName; error = "illisible apres 3 essais : $lastErr" })
                 Write-Warning "Erreur de lecture : $($f.FullName) - fichier ignore"
             } else {
                 $copied += [long]$f.Length
