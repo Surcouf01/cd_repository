@@ -914,8 +914,27 @@ function Invoke-ElevatedCdOperation {
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     # Copie du module vers le repertoire partage : le compte eleve peut ne pas
     # avoir acces au repertoire de profil (Documents) du compte courant.
+    # NB : le compte eleve n'a PAS non plus de session SMB avec le NAS - tout
+    # ce dont il a besoin doit etre local/partage : module, config ET l'ISO.
     $sharedDir = Join-Path $env:ProgramData 'cdrepo'
     if (-not (Test-Path $sharedDir)) { New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null }
+    $localIso = $null
+    if ($Operation -eq 'mount') {
+        try {
+            $cfg = Import-CdConfig
+            $index = Get-CdIndex
+            $entry = @($index.disks) | Where-Object { $_.id -eq $Id }
+            if ($entry) {
+                $isoSrc = Join-Path (Join-Path $cfg.RepositoryRoot (Get-MediaCategory $entry.category)) $entry.fileName
+                if ((Test-Path $isoSrc) -and -not (Test-Path $isoSrc -PathType Container)) {
+                    $localIso = Join-Path $sharedDir ('mount_' + [guid]::NewGuid().ToString('N') + '.iso')
+                    Copy-Item -LiteralPath $isoSrc -Destination $localIso -Force
+                }
+            }
+        } catch {
+            Write-TraceLog "[ELEV] Copie locale de l ISO impossible (le GUI la fera monter par le chemin reseau) : $($_.Exception.Message)" -Color 'DarkYellow'
+        }
+    }
     Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psm1') -Destination (Join-Path $sharedDir 'CdRepository.psm1') -Force
     Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psd1') -Destination (Join-Path $sharedDir 'CdRepository.psd1') -Force
     if (Test-Path (Join-Path $here 'config.json')) {
@@ -934,6 +953,13 @@ function Invoke-ElevatedCdOperation {
                 throw ('Import du module reussi mais $cmdName absent. Commandes exportees : ' + ((Get-Command -Module CdRepository -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', '))
             }
             try {
+                `$isoLocalPath = `$(if ('$localIso') { '$localIso' } else { '' })
+                if ('$Operation' -eq 'mount' -and `$isoLocalPath -and (Test-Path `$isoLocalPath)) {
+                    `$img = Mount-DiskImage -ImagePath `$isoLocalPath -PassThru -ErrorAction Stop
+                    `$vol = Get-Volume -DiskImage `$img -ErrorAction SilentlyContinue
+                    @{ ok = `$true; letter = `$(if (`$vol -and `$vol.DriveLetter) { [string]`$vol.DriveLetter } else { '' }); admin = `$admin; note = 'monte depuis copie locale pre-elevee' } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                    exit
+                }
                 `$r = $cmdName -Id '$Id'
                 @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }); admin = `$admin } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
             }
