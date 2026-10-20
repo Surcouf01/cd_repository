@@ -19,24 +19,10 @@ if ($env:CDREPO_GUI_FORKED -ne '1') {
     $forkArgs = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', (Join-Path $here 'CdRepositoryGui.ps1'))
     if ($VerboseErrors) { $forkArgs += '-VerboseErrors' }
     Write-Host "Relancement dans un processus dedie (garantit un AppDomain WPF vierge)..."
-    $forkOut = Join-Path $env:TEMP 'cdrepo_gui_fork_stdout.txt'
-    $forkErr = Join-Path $env:TEMP 'cdrepo_gui_fork_stderr.txt'
-    Remove-Item -LiteralPath $forkOut, $forkErr -Force -ErrorAction SilentlyContinue
-    $child = Start-Process -FilePath 'powershell.exe' -ArgumentList $forkArgs -PassThru -RedirectStandardOutput $forkOut -RedirectStandardError $forkErr
+    $child = Start-Process -FilePath 'powershell.exe' -ArgumentList $forkArgs -PassThru
     $child.WaitForExit()
     $env:CDREPO_GUI_FORKED = $null
-    $code = $child.ExitCode
-    if ($code -ne 0) {
-        $errTxt = ''
-        try { if (Test-Path $forkErr) { $errTxt = ([System.IO.File]::ReadAllLines($forkErr) | Where-Object { $_ }) -join "`n" } } catch { }
-        $outTxt = ''
-        try { if (Test-Path $forkOut) { $outTxt = ([System.IO.File]::ReadAllLines($forkOut) | Select-Object -Last 20) -join "`n" } } catch { }
-        Write-Host "Le processus GUI s est arrete (code $code)." -ForegroundColor Red
-        if ($errTxt) { Write-Host "--- stderr ---" -ForegroundColor Red; Write-Host $errTxt -ForegroundColor Red }
-        if ($outTxt) { Write-Host "--- stdout (fin) ---" -ForegroundColor Yellow; Write-Host $outTxt -ForegroundColor Yellow }
-        try { Add-Content -Path (Join-Path $env:TEMP 'CdRepositoryGui.log') -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [FORK] Processus GUI arrete (code $code). stderr: $errTxt" -Encoding UTF8 } catch { }
-    }
-    exit $code
+    exit $child.ExitCode
 }
 
 $script:VerboseErrors = [bool]$VerboseErrors
