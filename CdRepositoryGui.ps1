@@ -891,7 +891,7 @@ $controls['BtnRip'].Add_Click({
             $script:CopyProgressPos = $lines.Count
         }
 
-        if ($script:CopyProc.HasExited) {
+        if ($script:CopyProc -and $script:CopyProc.HasExited) {
             if (-not $script:CopyDone) {
                 Start-Sleep -Milliseconds 500
                 $script:CopyDone = $true
@@ -1236,6 +1236,10 @@ $dispatcher = [System.Windows.Threading.Dispatcher]::CurrentDispatcher
 $dispatcher.Add_UnhandledException({
     param($sender, $e)
     Write-ErrorLog -Context 'DISPATCHER' -Error $e.Exception
+    try {
+        $pos = $e.Exception.InnerException.StackTrace
+        Add-Content -Path (Join-Path $env:TEMP 'CdRepositoryGui.log') -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [DISPATCHER-POS] $($e.Exception.Message)" -Encoding UTF8
+    } catch { }
     [System.Windows.MessageBox]::Show(
         "Erreur interne de l'interface :`n`n$($e.Exception.Message)`n`nL'application reste ouverte. Details dans CdRepositoryGui.log.",
         'Erreur interne', 'OK', 'Error') | Out-Null

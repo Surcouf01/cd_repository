@@ -1435,8 +1435,13 @@ function Remove-CdFromRepository {
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
     if (-not $KeepFile -and (Test-Path $iso)) {
-        Remove-Item -LiteralPath $iso -Force
-        Write-Host "Fichier supprime : $iso"
+        if (Test-Path $iso -PathType Container) {
+            Remove-Item -LiteralPath $iso -Recurse -Force
+            Write-Host "Dossier supprime : $iso"
+        } else {
+            Remove-Item -LiteralPath $iso -Force
+            Write-Host "Fichier supprime : $iso"
+        }
     }
     $index.disks = @($index.disks | Where-Object { $_.id -ne $Id })
     Save-CdIndex -Index $index
