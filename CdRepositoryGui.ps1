@@ -972,7 +972,8 @@ function Invoke-ElevatedCdOperation {
                     @{ ok = `$true; letter = `$(if (`$vol -and `$vol.DriveLetter) { [string]`$vol.DriveLetter } else { '' }); admin = `$admin; note = 'monte depuis copie locale pre-elevee' } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
                     exit
                 }
-                if ('$Operation' -eq 'dismount' -and $(if ('$memoIso') { '$memoIso' } else { '' })) {
+                if ('$Operation' -eq 'dismount' -and '$memoIso' -and (Test-Path '$memoIso')) {
+                    Write-TraceLog "[ELEV-ENFANT] Demontage de la copie locale memoisee : $memoIso" -Color 'DarkYellow'
                     if (Test-Path '$memoIso') {
                         Dismount-DiskImage -ImagePath '$memoIso' -ErrorAction Stop | Out-Null
                         Remove-Item -LiteralPath '$memoIso' -Force -ErrorAction SilentlyContinue
@@ -1098,7 +1099,9 @@ $controls['BtnDismount'].Add_Click({
                 Dismount-CdFromRepository -Id $sel.Id
             } else {
                 Set-Status 'Elevation des droits demandee (demontage ISO)...'
+                Write-TraceLog "[ELEV] Demontage eleve demande pour id=$($sel.Id). Memo des montages : $((Get-Content -Path (Join-Path (Join-Path $env:ProgramData 'cdrepo') 'mounted_paths.json') -Raw -ErrorAction SilentlyContinue))" -Color 'DarkYellow'
                 $r = Invoke-ElevatedCdOperation -Operation 'dismount' -Id $sel.Id
+                Write-TraceLog "[ELEV] Resultat dismount : ok=$($r.ok) note=$($r.note) erreur=$($r.error)" -Color 'DarkYellow'
                 if (-not $r.ok) { throw $r.error }
             }
             Set-Status "Demonte : $($sel.Title)"
