@@ -738,9 +738,9 @@ function Invoke-CdAudioRipInternal {
                     }
                     if ($libFiles.Count -eq 0 -and $plCount -gt 0) {
                         Write-ModuleTrace 'Rip audio : album introuvable par titre ; rapprochement par duree des pistes du CD...'
-                        $cdDurations = @{}
+                        $cdDurations = New-Object System.Collections.ArrayList
                         for ($i = 0; $i -lt $plCount; $i++) {
-                            try { $cdDurations[[math]::Round($pl.item($i).duration)] = $true } catch { }
+                            try { [void]$cdDurations.Add([math]::Round($pl.item($i).duration)) } catch { }
                         }
                         if ($cdDurations.Count -gt 0) {
                             $allAudio = $wmp.mediaCollection.getByAttribute('MediaType', 'audio')
@@ -755,11 +755,16 @@ function Invoke-CdAudioRipInternal {
                                 if ($exts -notcontains $f.Extension.ToLower()) { continue }
                                 $dur = -1
                                 try { $dur = [math]::Round($m.duration) } catch { }
-                                if ($dur -ge 0 -and $cdDurations.ContainsKey($dur)) {
-                                    $libFiles += $f
+                                if ($dur -lt 0) { continue }
+                                for ($d = 0; $d -lt $cdDurations.Count; $d++) {
+                                    if ([math]::Abs($cdDurations[$d] - $dur) -le 2) {
+                                        $libFiles += $f
+                                        $cdDurations.RemoveAt($d)
+                                        break
+                                    }
                                 }
                             }
-                            Write-ModuleTrace "Rip audio : $($libFiles.Count) piste(s) correspondant aux durees du CD."
+                            Write-ModuleTrace "Rip audio : $($libFiles.Count) piste(s) correspondant aux durees du CD ($($cdDurations.Count) sans correspondance)."
                         }
                     }
                 }
