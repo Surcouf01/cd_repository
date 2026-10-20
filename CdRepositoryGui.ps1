@@ -1184,8 +1184,11 @@ $controls['BtnDelete'].Add_Click({
     $window.Cursor = 'Wait'
     $delRunspace = [runspacefactory]::CreateRunspace()
     $delRunspace.Open()
-    $delPs = [powershell]::Create()
-    $delPs.Runspace = $delRunspace
+    $script:DelPs = [powershell]::Create()
+    $script:DelPs.Runspace = $delRunspace
+    $script:DelRunspace = $delRunspace
+    $script:DelTitle = $delTitle
+    $delPs = $script:DelPs
     $delModule = Join-Path $here 'CdRepository.psd1'
     $delLog = Join-Path $env:TEMP 'CdRepositoryGui.log'
     $null = $delPs.AddScript({
@@ -1196,38 +1199,40 @@ $controls['BtnDelete'].Add_Click({
         Remove-CdFromRepository -Id $Id
         try { Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [DELETE] Suppression terminee." -Encoding UTF8 } catch { }
     }).AddArgument($delModule).AddArgument($delId).AddArgument($delLog)
-    $delAsync = $delPs.BeginInvoke()
+    $script:DelAsync = $delPs.BeginInvoke()
     $script:DelStart = Get-Date
-    $delTimer = New-Object System.Windows.Threading.DispatcherTimer
-    $delTimer.Interval = [TimeSpan]::FromMilliseconds(400)
-    $delTimer.Add_Tick({
-        if (-not $delAsync.IsCompleted) {
+    $script:DelTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:DelTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+    $script:DelTimer.Add_Tick({
+        if (-not $script:DelPs) { return }
+        if (-not $script:DelAsync.IsCompleted) {
             if (((Get-Date) - $script:DelStart).TotalSeconds -gt 20) {
-                $delTimer.Stop()
-                try { $delPs.Stop() } catch { }
-                try { $delPs.Dispose() } catch { }
-                try { $delRunspace.Dispose() } catch { }
+                $script:DelTimer.Stop()
+                try { $script:DelPs.Stop() } catch { }
+                try { $script:DelPs.Dispose() } catch { }
+                try { $script:DelRunspace.Dispose() } catch { }
                 $window.Cursor = 'Arrow'
                 $script:Busy = $false
                 Set-Status "Suppression interrompue : le NAS n a pas repondu en 20 s (fichier verrouille ou SMB bloque). Verifiez que le fichier n est pas ouvert sur le NAS." -Error
             }
             return
         }
-        $delTimer.Stop()
+        $script:DelTimer.Stop()
         try {
-            $null = $delPs.EndInvoke($delAsync)
-            Set-Status "Disque supprime : $delTitle"
+            $null = $script:DelPs.EndInvoke($script:DelAsync)
+            Set-Status "Disque supprime : $script:DelTitle"
         }
         catch { Set-Status "Erreur : $($_.Exception.Message)" -Error }
         finally {
-            $delPs.Dispose()
-            $delRunspace.Dispose()
+            $script:DelPs.Dispose()
+            $script:DelRunspace.Dispose()
+            $script:DelPs = $null
             $window.Cursor = 'Arrow'
             $script:Busy = $false
             Update-DiskGrid
         }
     })
-    $delTimer.Start()
+    $script:DelTimer.Start()
 })
 
 Set-Status "Pret. $($viewModels.Count) disque(s) dans l'index."
