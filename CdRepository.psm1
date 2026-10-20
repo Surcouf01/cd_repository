@@ -1372,13 +1372,51 @@ function Dismount-CdFromRepository {
         }
         return
     }
-    try {
-        Dismount-DiskImage -ImagePath $iso | Out-Null
-    } catch {
-        $code = $null
-        try { $code = $_.Exception.HResult } catch { }
-        throw "Demontage de l ISO impossible : Detail : $($_.Exception.Message) [code: 0x$('{0:X8}' -f $code)]"
+    # Le montage a pu se faire depuis une copie locale (ProgramData) si le
+    # compte eleve n avait pas de session SMB : le chemin reseau ne correspond
+    # alors a aucune image montee. Retrouver l image par son volume.
+    $dismounted = $false
+    $err = $null
+    foreach ($path in @($iso, (Join-Path (Join-Path $env:ProgramData 'cdrepo') $entry.fileName))) {
+        if (-not $path -or -not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            Dismount-DiskImage -ImagePath $path | Out-Null
+            $dismounted = $true
+            break
+        } catch { $err = $_ }
     }
+    if (-not $dismounted -and -not $err) {
+        # Rechercher parmi les images montees celle dont le volume correspond
+        # au contenu de l entree (meme taille d ISO sur le NAS).
+        try {
+            $nasSize = (Get-Item -LiteralPath $iso -ErrorAction Stop).Length
+            $imgs = @(Get-DiskImage -ErrorAction SilentlyContinue)
+            foreach ($img in $imgs) {
+                if ($img.Attached) {
+                    try {
+                        $vol = Get-Volume -DiskImage $img -ErrorAction SilentlyContinue
+                        if ($vol) {
+                            $srcPath = $img.ImagePath
+                            if ((Test-Path -LiteralPath $srcPath) -and (Get-Item -LiteralPath $srcPath).Length -eq $nasSize) {
+                                Dismount-DiskImage -ImagePath $srcPath | Out-Null
+                                $dismounted = $true
+                                break
+                            }
+                        }
+                    } catch { }
+                }
+            }
+        } catch { $err = $_ }
+    }
+    if (-not $dismounted) {
+        $code = $null
+        try { $code = $err.Exception.HResult } catch { }
+        $msg = if ($err) { $err.Exception.Message } else { 'aucune image montee ne correspond a ce disque' }
+        throw "Demontage de l ISO impossible : $msg [code: 0x$('{0:X8}' -f $code)]"
+    }
+    # Nettoyer la copie locale si elle existe encore
+    $localCopy = Join-Path (Join-Path $env:ProgramData 'cdrepo') $entry.fileName
+    if (Test-Path -LiteralPath $localCopy) { Remove-Item -LiteralPath $localCopy -Force -ErrorAction SilentlyContinue }
     Write-Host "Demonte : $($entry.title)"
 }
 
