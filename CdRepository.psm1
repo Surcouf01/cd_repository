@@ -788,7 +788,7 @@ function Invoke-CdAudioRipInternal {
                 return $libFiles
             }
             if ($libFiles.Count -gt 0 -and $libFiles.Count -lt $plCount) {
-                throw ("Extraction partielle detectee : $($libFiles.Count) piste(s) sur $plCount sont presentes dans la bibliotheque WMP. WMP refuse de re-extraire car il considere l album deja extrait. Action manuelle requise une seule fois : ouvrez Windows Media Player, bibliotheque Musique, supprimez l album (clic droit > Supprimer > 'de la bibliotheque et de mon ordinateur'), puis relancez la copie."
+                throw ("Extraction partielle detectee : $($libFiles.Count) piste(s) sur $plCount sont presentes dans la bibliotheque WMP. WMP refuse de re-extraire car il considere l album deja extrait. Action manuelle requise une seule fois : ouvrez Windows Media Player, bibliotheque Musique, supprimez l album (clic droit > Supprimer > 'de la bibliotheque et de mon ordinateur'), puis relancez la copie.")
             }
             throw ("Le rip s arrete immediatement sans produire de fichier. Causes connues : (1) les pistes de ce CD ont deja ete extraites par WMP lors d un run precedent - supprimez l album de la bibliotheque WMP ou utilisez un autre CD ; (2) dossier d extraction invalide dans WMP (Options > Extraire de la musique) ; (3) WMP n a jamais ete lance une premiere fois (relancez-le manuellement et verifiez que l extraction manuelle fonctionne).")
         }
