@@ -1353,8 +1353,19 @@ function Dismount-CdFromRepository {
             if ($mapped) { $letter = $mapped[0].Substring(0,1) }
         }
         if ($letter) {
-            if ($isUnc) { $null = & net use "${letter}:" /delete 2>$null }
-            else { & subst "${letter}: /d" 2>$null }
+            if ($isUnc) {
+                $out = & net use "${letter}:" /delete 2>&1
+                $code = $LASTEXITCODE
+            } else {
+                $out = & subst "${letter}: /d" 2>&1
+                $code = 0
+            }
+            Start-Sleep -Milliseconds 300
+            $still = Get-PSDrive -Name $letter -ErrorAction SilentlyContinue
+            if ($still) {
+                $outTxt = (@($out) | Where-Object { $_ }) -join ' '
+                throw "La lettre ${letter}: n a pas pu etre liberee (net use /delete code $code). $outTxt - fermez les fenetres/fichiers ouverts utilisant ce lecteur puis reessayez."
+            }
             Write-Host "Demonte : $($entry.title) (lettre ${letter}: liberee)"
         } else {
             Write-Host "Aucun mappage actif pour $($entry.title) (conteneur audio)."
