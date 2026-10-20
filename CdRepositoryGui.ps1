@@ -60,6 +60,23 @@ Write-TraceLog "Module importe."
 
 Write-TraceLog '--- Verification des prerequis ---' -Color 'Cyan'
 try {
+    Write-TraceLog '--- Nettoyage des fichiers temporaires (>24 h) ---' -Color 'Cyan'
+    $cutoff = (Get-Date).AddHours(-24)
+    $purged = 0
+    foreach ($dir in @((Join-Path $env:TEMP 'cdrepo_job'), (Join-Path $env:ProgramData 'cdrepo'))) {
+        if (-not (Test-Path $dir)) { continue }
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue)) {
+            if ($f.Name -match '^(mount_|cdrepo_mount_|cdrepo_rip_|elev_result_|cdrepo_ripprogress_|cdrepo_progress_)' -and
+                $f.LastWriteTime -lt $cutoff) {
+                try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop; $purged++ } catch { }
+            }
+        }
+    }
+    Write-TraceLog "Nettoyage : $purged fichier(s) temporaire(s) supprime(s)." -Color 'DarkCyan'
+} catch {
+    Write-TraceLog "Nettoyage impossible : $($_.Exception.Message)" -Color 'DarkYellow'
+}
+try {
     Write-TraceLog '--- Resynchronisation de l index depuis le NAS ---' -Color 'Cyan'
     $sync = Sync-CdIndexFromDisk
     Write-TraceLog ("Index resynchronise : +{0} ajoute(s), {1} manquant(s), {2} ISO invalide(s), {3} categorie inconnue(s)." -f $sync.Added, $sync.Missing, $sync.Invalid, $sync.CategoryUnknown) -Color 'DarkCyan'
