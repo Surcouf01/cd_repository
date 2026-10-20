@@ -1130,8 +1130,8 @@ function Copy-CdToRepository {
             $dest = Join-Path $tempRoot $d.FullName.Substring($srcRoot.Length)
             if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
         }
-        $totalBytes = ($allFiles | Measure-Object Length -Sum).Sum
-        if (-not $totalBytes) { $totalBytes = 0 }
+        $totalBytes = [long](($allFiles | Measure-Object Length -Sum).Sum)
+        if (-not $totalBytes) { $totalBytes = [long]0 }
         if ($ProgressCallback) { & $ProgressCallback 1 "Structure lue : $($allFiles.Count) fichier(s), $([math]::Round($totalBytes/1MB,1)) Mo" }
         $copied = 0; $n = 0
         $readErrors = New-Object System.Collections.ArrayList
@@ -1146,7 +1146,7 @@ function Copy-CdToRepository {
                 catch {
                     if (Test-Path $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue }
                     if ($try -lt 3) {
-                        if ($ProgressCallback) { & $ProgressCallback ([int][math]::Floor(70.0 * $copied / [Math]::Max(1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
+                        if ($ProgressCallback) { & $ProgressCallback ([int][math]::Floor(70.0 * $copied / [Math]::Max([long]1,$totalBytes))) ("Reessai $try/3 : $($f.Name)") }
                         Start-Sleep -Milliseconds 800
                     }
                 }
