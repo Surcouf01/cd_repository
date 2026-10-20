@@ -469,11 +469,11 @@ namespace CdRepo {
             return null;
         }
 
-        private static int FindSlot(ITypeInfo ti, TYPEATTR attr, string methodName, string logFile) {
+        private static int FindSlot(ITypeInfo ti, System.Runtime.InteropServices.ComTypes.TYPEATTR attr, string methodName, string logFile) {
             for (int f = 0; f < attr.cFuncs; f++) {
                 IntPtr pFd;
                 ti.GetFuncDesc(f, out pFd);
-                FUNCDESC fd = (FUNCDESC)Marshal.PtrToStructure(pFd, typeof(FUNCDESC));
+                System.Runtime.InteropServices.ComTypes.FUNCDESC fd = (System.Runtime.InteropServices.ComTypes.FUNCDESC)Marshal.PtrToStructure(pFd, typeof(System.Runtime.InteropServices.ComTypes.FUNCDESC));
                 string[] names = new string[8];
                 int pcNames;
                 ti.GetNames(fd.memid, names, names.Length, out pcNames);
@@ -497,7 +497,7 @@ namespace CdRepo {
             if (collInfo == null) { throw new Exception("IWMPCdromCollection absent de la typelib."); }
             IntPtr pCollAttr;
             collInfo.GetTypeAttr(out pCollAttr);
-            TYPEATTR collAttr = (TYPEATTR)Marshal.PtrToStructure(pCollAttr, typeof(TYPEATTR));
+            System.Runtime.InteropServices.ComTypes.TYPEATTR collAttr = (System.Runtime.InteropServices.ComTypes.TYPEATTR)Marshal.PtrToStructure(pCollAttr, typeof(System.Runtime.InteropServices.ComTypes.TYPEATTR));
             Guid iidColl = collAttr.guid;
             int slotGetBy = FindSlot(collInfo, collAttr, "getByDriveSpecifier", logFile);
             collInfo.ReleaseTypeAttr(pCollAttr);
@@ -508,7 +508,7 @@ namespace CdRepo {
             if (ripInfo == null) { throw new Exception("IWMPCdromRip absent de la typelib."); }
             IntPtr pRipAttr;
             ripInfo.GetTypeAttr(out pRipAttr);
-            TYPEATTR ripAttr = (TYPEATTR)Marshal.PtrToStructure(pRipAttr, typeof(TYPEATTR));
+            System.Runtime.InteropServices.ComTypes.TYPEATTR ripAttr = (System.Runtime.InteropServices.ComTypes.TYPEATTR)Marshal.PtrToStructure(pRipAttr, typeof(System.Runtime.InteropServices.ComTypes.TYPEATTR));
             Guid iidRip = ripAttr.guid;
             int slotStart = FindSlot(ripInfo, ripAttr, "startRip", logFile);
             int slotStop = FindSlot(ripInfo, ripAttr, "stopRip", logFile);
