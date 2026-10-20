@@ -653,13 +653,25 @@ function Invoke-CdAudioRipInternal {
         $timer = New-Object System.Windows.Forms.Timer
         $timer.Interval = 1000
         $poll = 0
+        $script:RipTrackIndex = -1
+        $script:RipTrackCount = 0
+        try {
+            $ripPl = $cdrom.Playlist
+            if ($ripPl) { $script:RipTrackCount = $ripPl.count }
+        } catch { }
         $timer.Add_Tick({
             try {
                 $poll++
                 $state = $script:RipRaw.GetState()
                 $pct = $script:RipRaw.GetProgress()
                 if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
-                if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
+                if ($script:RipTrackCount -gt 0) {
+                    $trackIdx = [math]::Min($script:RipTrackCount, [math]::Max(1, [math]::Floor($pct / 100.0 * $script:RipTrackCount)) + 1)
+                    $ripDetail = "Extraction audio : piste $trackIdx / $($script:RipTrackCount)"
+                } else {
+                    $ripDetail = 'Extraction audio en cours'
+                }
+                if ($ProgressCallback) { & $ProgressCallback $pct $ripDetail }
                 if ($state -ne 1 -and $script:RipAttempts -lt 3 -and (Get-Date) -lt $script:RipGraceEnd) {
                     Write-ModuleTrace "Rip audio : rip arrete immediatement (etat=$state, tentative $($script:RipAttempts)/3). Nouvelle tentative..."
                     $script:RipAttempts++
