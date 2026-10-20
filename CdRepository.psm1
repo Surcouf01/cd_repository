@@ -600,6 +600,8 @@ function Invoke-CdAudioRipInternal {
 
         $ripStart = Get-Date
         $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+        $script:RipAttempts = 1
+        $script:RipGraceEnd = (Get-Date).AddSeconds(30)
         $script:RipRaw = [CdRepo.WmpRaw]::BindByDrive($cdroms, "${drive}:", $wmpPath, $logFile)
         Write-ModuleTrace 'Rip audio : binder vtable operationnel (details [WMPRAW]).'
 
@@ -618,7 +620,14 @@ function Invoke-CdAudioRipInternal {
                 $pct = $script:RipRaw.GetProgress()
                 if ($poll % 5 -eq 1) { Write-ModuleTrace "Rip audio : poll #$poll etat=$state progression=$pct %." }
                 if ($ProgressCallback) { & $ProgressCallback $pct "Extraction audio : $pct %" }
-                if ($state -ne 1) {
+                if ($state -ne 1 -and $script:RipAttempts -lt 3 -and (Get-Date) -lt $script:RipGraceEnd) {
+                    Write-ModuleTrace "Rip audio : rip arrete immediatement (etat=$state, tentative $($script:RipAttempts)/3). Nouvelle tentative..."
+                    $script:RipAttempts++
+                    Start-Sleep -Seconds 5
+                    $script:RipRaw.StartRip()
+                    Write-ModuleTrace "Rip audio : startRip relance (tentative $($script:RipAttempts))."
+                }
+                elseif ($state -ne 1) {
                     Write-ModuleTrace "Rip audio : etat passe a $state (progression $pct %)."
                     $script:RipResult = 'done'
                     $timer.Stop()
