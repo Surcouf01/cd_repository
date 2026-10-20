@@ -1057,6 +1057,19 @@ $controls['BtnDismount'].Add_Click({
     if (-not $sel) { return }
     Wait-Cursor {
         try {
+            # Conteneur audio (dossier, pas ISO) : demappage net use sans elevation -
+            # le mappage vit dans la session utilisateur, il faut la session pour le supprimer.
+            $cfg = Import-CdConfig
+            $idx = Get-CdIndex
+            $e = @($idx.disks) | Where-Object { $_.id -eq $sel.Id }
+            if ($e) {
+                $p = Join-Path (Join-Path $cfg.RepositoryRoot (Get-MediaCategory $e.category)) $e.fileName
+                if (Test-Path $p -PathType Container) {
+                    Dismount-CdFromRepository -Id $sel.Id
+                    Set-Status "Demonte : $($sel.Title)"
+                    return
+                }
+            }
             if (Test-GuiAdmin) {
                 Dismount-CdFromRepository -Id $sel.Id
             } else {
