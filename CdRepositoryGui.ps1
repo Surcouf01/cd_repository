@@ -912,7 +912,16 @@ function Invoke-ElevatedCdOperation {
     if (-not (Test-Path $sharedDir)) { New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null }
     $resultPath = Join-Path $sharedDir ("elev_result_" + [guid]::NewGuid().ToString('N') + '.json')
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-    $modulePath = Join-Path $here 'CdRepository.psd1'
+    # Copie du module vers le repertoire partage : le compte eleve peut ne pas
+    # avoir acces au repertoire de profil (Documents) du compte courant.
+    $sharedDir = Join-Path $env:ProgramData 'cdrepo'
+    if (-not (Test-Path $sharedDir)) { New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null }
+    Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psm1') -Destination (Join-Path $sharedDir 'CdRepository.psm1') -Force
+    Copy-Item -LiteralPath (Join-Path $here 'CdRepository.psd1') -Destination (Join-Path $sharedDir 'CdRepository.psd1') -Force
+    if (Test-Path (Join-Path $here 'config.json')) {
+        Copy-Item -LiteralPath (Join-Path $here 'config.json') -Destination (Join-Path $sharedDir 'config.json') -Force
+    }
+    $modulePath = Join-Path $sharedDir 'CdRepository.psd1'
     # Les valeurs sont interpolees directement dans le script encode :
     # -EncodedCommand ne transmet aucun argument au script.
     $cmdName = $(if ($Operation -eq 'mount') { 'Mount-CdFromRepository' } else { 'Dismount-CdFromRepository' })
