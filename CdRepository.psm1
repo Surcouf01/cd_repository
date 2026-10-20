@@ -418,7 +418,7 @@ function New-WmpRipRaw {
     }
     if (-not ('CdRepo.WmpRaw' -as [type])) {
         Write-ModuleTrace 'Rip audio : compilation du binder typelib v2 vers DLL persistante...'
-        Add-Type -TypeDefinition @'
+        $srcRip = @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -558,7 +558,11 @@ namespace CdRepo {
         }
     }
 }
-'@ -OutputAssembly $binderDll -CompilerOptions '/platform:AnyCPU'
+'@
+        $cp = New-Object System.CodeDom.Compiler.CompilerParameters
+        $cp.OutputAssembly = $binderDll
+        $cp.CompilerOptions = '/platform:AnyCPU'
+        Add-Type -TypeDefinition $srcRip -CompilerParameters $cp
         $null = [Reflection.Assembly]::LoadFrom($binderDll)
         Write-ModuleTrace 'Rip audio : binder v2 compile vers $binderDll et charge.'
     }
