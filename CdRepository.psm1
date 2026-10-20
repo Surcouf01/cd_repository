@@ -660,7 +660,7 @@ function Invoke-CdAudioRipInternal {
 
         if ($ProgressCallback) { & $ProgressCallback 100 'Extraction audio terminee.' }
         Write-ModuleTrace 'Rip audio termine. Recherche des fichiers produits...'
-        $ripped = Get-RippedFiles -Since $ripStart
+        $ripped = @(Get-RippedFiles -Since $ripStart)
         Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
         if ($ripped.Count -eq 0) {
             throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
