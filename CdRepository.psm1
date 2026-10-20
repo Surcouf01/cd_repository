@@ -1250,7 +1250,9 @@ function Mount-CdFromRepository {
     try {
         $img = Mount-DiskImage -ImagePath $iso -NoDriveLetter -PassThru
     } catch {
-        throw "Montage de l ISO impossible (acces refuse) : le montage ISO exige une elevation administrateur. Relancez le script/le GUI en administrateur (clic droit > Executer en tant qu administrateur). Detail : $($_.Exception.Message)"
+        $code = $null
+        try { $code = $_.Exception.HResult } catch { }
+        throw "Montage de l ISO impossible : Detail : $($_.Exception.Message) [code: 0x$('{0:X8}' -f $code)]"
     }
     $mounted = $false
     try {
@@ -1275,7 +1277,7 @@ function Mount-CdFromRepository {
     if (-not $mounted) {
         try { Dismount-DiskImage -ImagePath $iso | Out-Null } catch { }
         $img2 = $null
-        try { $img2 = Mount-DiskImage -ImagePath $iso -PassThru } catch { throw "Montage de l ISO impossible (acces refuse) : elevation administrateur requise. Detail : $($_.Exception.Message)" }
+        try { $img2 = Mount-DiskImage -ImagePath $iso -PassThru } catch { $code = $null; try { $code = $_.Exception.HResult } catch { }; throw "Montage de l ISO impossible : Detail : $($_.Exception.Message) [code: 0x$('{0:X8}' -f $code)]" }
         $vol2 = Get-Volume -DiskImage $img2 -ErrorAction SilentlyContinue
         if ($vol2 -and $vol2.DriveLetter) {
             $letter = [string]$vol2.DriveLetter
@@ -1300,7 +1302,9 @@ function Dismount-CdFromRepository {
     try {
         Dismount-DiskImage -ImagePath $iso | Out-Null
     } catch {
-        throw "Demontage de l ISO impossible (acces refuse) : le demontage ISO exige une elevation administrateur. Relancez le script/le GUI en administrateur. Detail : $($_.Exception.Message)"
+        $code = $null
+        try { $code = $_.Exception.HResult } catch { }
+        throw "Demontage de l ISO impossible : Detail : $($_.Exception.Message) [code: 0x$('{0:X8}' -f $code)]"
     }
     Write-Host "Demonte : $($entry.title)"
 }
