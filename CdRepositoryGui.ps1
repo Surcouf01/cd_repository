@@ -336,6 +336,16 @@ function Get-SelectedDisk {
 $viewModels = New-Object System.Collections.ObjectModel.ObservableCollection[object]
 $controls['GridDisks'].ItemsSource = $viewModels
 
+$controls['GridDisks'].Add_LoadingRow({
+    param($sender, $e)
+    $vm = $e.Row.Item
+    if ($vm -and $vm.PSObject.Properties['RowColor'] -and $vm.RowColor) {
+        $e.Row.Background = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($vm.RowColor)
+    } else {
+        $e.Row.Background = [System.Windows.Media.Brushes]::White
+    }
+})
+
 function Update-DiskGrid {
     $viewModels.Clear()
     $cat = $controls['CmbCategory'].SelectedItem
@@ -377,11 +387,6 @@ function Update-DiskGrid {
         })
     }
     Set-Status "$($viewModels.Count) disque(s) affiche(s)."
-    foreach ($i in 0..($viewModels.Count - 1)) {
-        if ($viewModels[$i].RowColor) {
-            $controls['GridDisks'].Rows[$i].Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString($viewModels[$i].RowColor)
-        }
-    }
 }
 
 function Update-ContentPane {
