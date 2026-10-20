@@ -938,13 +938,17 @@ function Invoke-ElevatedCdOperation {
                 @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }); admin = `$admin } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
             }
             catch {
-                if ('$Operation' -eq 'mount' -and `$_.Exception.Message -match 'acces refuse|Accès refusé') {
+                if ('$Operation' -eq 'mount') {
                     `$cfg = Import-CdConfig
                     `$index = Get-CdIndex
                     `$entry = @(`$index.disks) | Where-Object { `$_.id -eq '$Id' }
                     if (`$entry) {
                         `$isoSrc = Join-Path (Join-Path `$cfg.RepositoryRoot (`$entry.category)) `$entry.fileName
-                        if ((Test-Path `$isoSrc) -and -not (Test-Path `$isoSrc -PathType Container)) {
+                        if (-not (Test-Path `$isoSrc)) {
+                            @{ ok = `$false; error = ('Repli local impossible : ISO source introuvable (' + `$isoSrc + '). Erreur d origine : ' + `$_.Exception.Message) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                            exit
+                        }
+                        if (-not (Test-Path `$isoSrc -PathType Container)) {
                             `$isoLocal = Join-Path `$env:TEMP ('cdrepo_mount_' + [guid]::NewGuid().ToString('N') + '.iso')
                             Copy-Item -LiteralPath `$isoSrc -Destination `$isoLocal -Force
                             try {
@@ -958,9 +962,18 @@ function Invoke-ElevatedCdOperation {
                                 exit
                             }
                         }
+                        else {
+                            @{ ok = `$false; error = ('Repli non applicable (conteneur audio, pas un ISO). Erreur d origine : ' + `$_.Exception.Message) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                            exit
+                        }
+                    }
+                    else {
+                        @{ ok = `$false; error = ('Repli impossible : entree introuvable dans l index pour cet id. Erreur d origine : ' + `$_.Exception.Message) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                        exit
                     }
                 }
-                throw
+                @{ ok = `$false; error = (`$_.Exception.Message + ' [type: ' + `$_.Exception.GetType().Name + ', eleve: ' + `$admin + ']') } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                exit
             }
         }
         catch {
