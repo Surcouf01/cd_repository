@@ -892,19 +892,6 @@ function Test-GuiAdmin {
 
 function Invoke-ElevatedCdOperation {
     param([string]$Operation, [string]$Id)
-    $opScript = {
-        param($Operation, $Id, $ModulePath, $ResultPath)
-        try {
-            Import-Module $ModulePath -Force
-            if ($Operation -eq 'mount') { $r = Mount-CdFromRepository -Id $Id }
-            else { $r = Dismount-CdFromRepository -Id $Id }
-            @{ ok = $true; letter = $(if ($r -and $r.Letter) { [string]$r.Letter } else { '' }) } | ConvertTo-Json | Set-Content -Path $ResultPath -Encoding UTF8
-        }
-        catch {
-            @{ ok = $false; error = $_.Exception.Message } | ConvertTo-Json | Set-Content -Path $ResultPath -Encoding UTF8
-        }
-    }
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript.ToString()))
     # Repertoire partage : le processus eleve peut avoir un %TEMP% different
     # (compte administrateur distinct), le resultat doit etre lisible par le GUI.
     $sharedDir = Join-Path $env:ProgramData 'cdrepo'
@@ -912,6 +899,19 @@ function Invoke-ElevatedCdOperation {
     $resultPath = Join-Path $sharedDir ("elev_result_" + [guid]::NewGuid().ToString('N') + '.json')
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     $modulePath = Join-Path $here 'CdRepository.psd1'
+    # Les valeurs sont interpolees directement dans le script encode :
+    # -EncodedCommand ne transmet aucun argument au script.
+    $opScript = "
+        try {
+            Import-Module -Name '$modulePath' -Force
+            if ('$Operation' -eq 'mount') { `$r = Mount-CdFromRepository -Id '$Id' }
+            else { `$r = Dismount-CdFromRepository -Id '$Id' }
+            @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+        }
+        catch {
+            @{ ok = `$false; error = `$_.Exception.Message } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+        }"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript))
     $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand $encoded"
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs -PassThru -WindowStyle Hidden -Wait
     if (-not (Test-Path $resultPath)) {
