@@ -957,14 +957,14 @@ $controls['BtnDelete'].Add_Click({
     $delTimer.Interval = [TimeSpan]::FromMilliseconds(400)
     $delTimer.Add_Tick({
         if (-not $delAsync.IsCompleted) {
-            if (((Get-Date) - $script:DelStart).TotalSeconds -gt 60) {
+            if (((Get-Date) - $script:DelStart).TotalSeconds -gt 20) {
                 $delTimer.Stop()
                 try { $delPs.Stop() } catch { }
                 try { $delPs.Dispose() } catch { }
                 try { $delRunspace.Dispose() } catch { }
                 $window.Cursor = 'Arrow'
                 $script:Busy = $false
-                Set-Status "Suppression interrompue : le NAS n a pas repondu en 60 s (fichier verrouille ou SMB bloque). Verifiez que le fichier n est pas ouvert sur le NAS." -Error
+                Set-Status "Suppression interrompue : le NAS n a pas repondu en 20 s (fichier verrouille ou SMB bloque). Verifiez que le fichier n est pas ouvert sur le NAS." -Error
             }
             return
         }

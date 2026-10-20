@@ -1166,7 +1166,12 @@ function Mount-CdFromRepository {
         $letter = $free[0]
     }
 
-    $img = Mount-DiskImage -ImagePath $iso -NoDriveLetter -PassThru
+    $img = $null
+    try {
+        $img = Mount-DiskImage -ImagePath $iso -NoDriveLetter -PassThru
+    } catch {
+        throw "Montage de l ISO impossible (acces refuse) : le montage ISO exige une elevation administrateur. Relancez le script/le GUI en administrateur (clic droit > Executer en tant qu administrateur). Detail : $($_.Exception.Message)"
+    }
     $mounted = $false
     try {
         $vol = Get-Volume -DiskImage $img -ErrorAction SilentlyContinue
@@ -1188,8 +1193,9 @@ function Mount-CdFromRepository {
         }
     } catch { $mounted = $false }
     if (-not $mounted) {
-        Dismount-DiskImage -ImagePath $iso | Out-Null
-        $img2 = Mount-DiskImage -ImagePath $iso -PassThru
+        try { Dismount-DiskImage -ImagePath $iso | Out-Null } catch { }
+        $img2 = $null
+        try { $img2 = Mount-DiskImage -ImagePath $iso -PassThru } catch { throw "Montage de l ISO impossible (acces refuse) : elevation administrateur requise. Detail : $($_.Exception.Message)" }
         $vol2 = Get-Volume -DiskImage $img2 -ErrorAction SilentlyContinue
         if ($vol2 -and $vol2.DriveLetter) {
             $letter = [string]$vol2.DriveLetter
@@ -1211,7 +1217,11 @@ function Dismount-CdFromRepository {
     if (-not $entry) { throw "Aucun disque avec l'id '$Id'." }
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
-    Dismount-DiskImage -ImagePath $iso | Out-Null
+    try {
+        Dismount-DiskImage -ImagePath $iso | Out-Null
+    } catch {
+        throw "Demontage de l ISO impossible (acces refuse) : le demontage ISO exige une elevation administrateur. Relancez le script/le GUI en administrateur. Detail : $($_.Exception.Message)"
+    }
     Write-Host "Demonte : $($entry.title)"
 }
 
