@@ -927,16 +927,44 @@ function Invoke-ElevatedCdOperation {
     $cmdName = $(if ($Operation -eq 'mount') { 'Mount-CdFromRepository' } else { 'Dismount-CdFromRepository' })
     $opScript = "
         `$ErrorActionPreference = 'Stop'
+        `$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         try {
             Import-Module -Name '$modulePath' -Force -ErrorAction Stop
             if (-not (Get-Command -Name '$cmdName' -ErrorAction SilentlyContinue)) {
                 throw ('Import du module reussi mais $cmdName absent. Commandes exportees : ' + ((Get-Command -Module CdRepository -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) -join ', '))
             }
-            `$r = $cmdName -Id '$Id'
-            @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }) } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+            try {
+                `$r = $cmdName -Id '$Id'
+                @{ ok = `$true; letter = `$(if (`$r -and `$r.Letter) { [string]`$r.Letter } else { '' }); admin = `$admin } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+            }
+            catch {
+                if ('$Operation' -eq 'mount' -and `$_.Exception.Message -match 'acces refuse|Accès refusé') {
+                    `$cfg = Import-CdConfig
+                    `$index = Get-CdIndex
+                    `$entry = @(`$index.disks) | Where-Object { `$_.id -eq '$Id' }
+                    if (`$entry) {
+                        `$isoSrc = Join-Path (Join-Path `$cfg.RepositoryRoot (`$entry.category)) `$entry.fileName
+                        if ((Test-Path `$isoSrc) -and -not (Test-Path `$isoSrc -PathType Container)) {
+                            `$isoLocal = Join-Path `$env:TEMP ('cdrepo_mount_' + [guid]::NewGuid().ToString('N') + '.iso')
+                            Copy-Item -LiteralPath `$isoSrc -Destination `$isoLocal -Force
+                            try {
+                                `$img = Mount-DiskImage -ImagePath `$isoLocal -PassThru -ErrorAction Stop
+                                `$vol = Get-Volume -DiskImage `$img -ErrorAction SilentlyContinue
+                                @{ ok = `$true; letter = `$(if (`$vol -and `$vol.DriveLetter) { [string]`$vol.DriveLetter } else { '' }); admin = `$admin; note = 'ISO copie en local avant montage (reseau refuse)' } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                                exit
+                            }
+                            catch {
+                                @{ ok = `$false; error = ('Montage impossible meme apres copie locale : ' + `$_.Exception.Message + ' [eleve: ' + `$admin + ']') } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+                                exit
+                            }
+                        }
+                    }
+                }
+                throw
+            }
         }
         catch {
-            @{ ok = `$false; error = (`$_.Exception.Message + ' [type: ' + `$_.Exception.GetType().Name + ']') } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
+            @{ ok = `$false; error = (`$_.Exception.Message + ' [type: ' + `$_.Exception.GetType().Name + ', eleve: ' + `$admin + ']') } | ConvertTo-Json | Set-Content -Path '$resultPath' -Encoding UTF8
         }"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript))
     $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand $encoded"
