@@ -905,15 +905,21 @@ function Invoke-ElevatedCdOperation {
         }
     }
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($opScript.ToString()))
-    $resultPath = Join-Path $env:TEMP ("cdrepo_elev_result_" + [guid]::NewGuid().ToString('N') + '.json')
+    # Repertoire partage : le processus eleve peut avoir un %TEMP% different
+    # (compte administrateur distinct), le resultat doit etre lisible par le GUI.
+    $sharedDir = Join-Path $env:ProgramData 'cdrepo'
+    if (-not (Test-Path $sharedDir)) { New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null }
+    $resultPath = Join-Path $sharedDir ("elev_result_" + [guid]::NewGuid().ToString('N') + '.json')
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     $modulePath = Join-Path $here 'CdRepository.psd1'
     $argLine = "-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand $encoded"
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs -PassThru -WindowStyle Hidden -Wait
     if (-not (Test-Path $resultPath)) {
-        throw "L operation a ete annulee (elevation refusee) ou n a pas produit de resultat (code : $($proc.ExitCode))."
+        throw "L operation a ete annulee (elevation refusee) ou n a pas produit de resultat (code : $($proc.ExitCode)). Resultat attendu : $resultPath"
     }
-    return (Get-Content -Path $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+    $result = Get-Content -Path $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    return $result
 }
 
 $controls['BtnMount'].Add_Click({
