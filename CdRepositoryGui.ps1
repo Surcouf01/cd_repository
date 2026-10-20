@@ -247,7 +247,7 @@ function Show-CopyOverlay {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Copie en cours" Width="520" Height="240" WindowStyle="None" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" Background="WhiteSmoke" ShowInTaskbar="False"
-        AllowsTransparency="False" Topmost="True">
+        AllowsTransparency="False">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -285,6 +285,7 @@ function Show-CopyOverlay {
 </Window>
 '@
     $script:OverlayWindow = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$ovXaml)))
+    $script:OverlayWindow.Owner = $window
     $script:OverlayCvs    = $script:OverlayWindow.FindName('Cvs')
     $script:OverlayPb     = $script:OverlayWindow.FindName('PbPercent')
     $script:OverlayLbl    = $script:OverlayWindow.FindName('LblDetail')
