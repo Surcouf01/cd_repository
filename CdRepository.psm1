@@ -672,7 +672,7 @@ function Invoke-CdAudioRipInternal {
         $ripped = @(Get-RippedFiles -Since $ripStart)
         Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
         if ($ripped.Count -eq 0) {
-            throw "Le rip semble termine mais aucune piste nouvelle n a ete trouvee dans le dossier Musique. Verifiez le dossier d extraction configure dans Windows Media Player (Options > Extraire de la musique)."
+            throw ("Le rip s arrete immediatement sans produire de fichier. Causes connues : (1) les pistes de ce CD ont deja ete extraites par WMP lors d un run precedent - supprimez l album de la bibliotheque WMP ou utilisez un autre CD ; (2) dossier d extraction invalide dans WMP (Options > Extraire de la musique) ; (3) WMP n a jamais ete lance une premiere fois (relancez-le manuellement et verifiez que l extraction manuelle fonctionne).")
         }
         return $ripped
     }
