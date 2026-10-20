@@ -137,6 +137,7 @@ $xamlText = @'
                 </Grid>
                 <ComboBox x:Name="CmbCategory" Width="130" Height="24" Margin="6,0,0,0"/>
                 <Button x:Name="BtnClear"   Content="Effacer"   Width="70" Margin="6,0,0,0"/>
+                <Button x:Name="BtnPrint"    Content="Imprimer..." Width="90" Margin="6,0,0,0" ToolTip="Imprimer la liste des disques (vue courante)"/>
             </StackPanel>
         </DockPanel>
 
@@ -183,7 +184,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 
 $controls = @{}
 foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh',
-               'TxtSearch','CmbCategory','BtnClear',
+               'TxtSearch','CmbCategory','BtnClear','BtnPrint',
                'GridDisks','ListContent','TxtStatus') {
     $controls[$n] = $window.FindName($n)
 }
@@ -274,7 +275,7 @@ function Show-CopyOverlay {
 
     $script:OverlayWindow.Owner = $window
     $script:Busy = $true
-    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear') {
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear','BtnPrint') {
         $controls[$b].IsEnabled = $false
     }
     [void]$script:OverlayWindow.Show()
@@ -305,7 +306,7 @@ function Hide-CopyOverlay {
         $script:OverlayWindow = $null
     }
     $script:Busy = $false
-    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear') {
+    foreach ($b in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh','BtnClear','BtnPrint') {
         $controls[$b].IsEnabled = $true
     }
 }
@@ -503,6 +504,63 @@ $controls['TxtSearch'].Add_KeyDown({
         Invoke-Search
         $_.Handled = $true
     }
+})
+
+$controls['BtnPrint'].Add_Click({
+    try {
+        $rows = @($viewModels)
+        if ($rows.Count -eq 0) { Set-Status 'Rien a imprimer : la liste est vide.' -Error; return }
+        $dlg = New-Object System.Windows.Controls.PrintDialog
+        if (-not $dlg.ShowDialog()) { return }
+        $doc = New-Object System.Windows.Documents.FlowDocument
+        $doc.PagePadding = New-Object System.Windows.Thickness(40)
+        $doc.FontFamily = New-Object System.Windows.Media.FontFamily('Segoe UI')
+        $doc.FontSize = 12
+        $title = New-Object System.Windows.Documents.Paragraph(New-Object System.Windows.Documents.Run("Index CD - $($rows.Count) disque(s)"))
+        $title.FontSize = 18
+        $title.FontWeight = 'Bold'
+        $doc.Blocks.Add($title)
+        $datePara = New-Object System.Windows.Documents.Paragraph(New-Object System.Windows.Documents.Run("Imprime le $(Get-Date -Format 'yyyy-MM-dd HH:mm')"))
+        $datePara.FontSize = 10
+        $datePara.Foreground = [System.Windows.Media.Brushes]::Gray
+        $doc.Blocks.Add($datePara)
+        $table = New-Object System.Windows.Documents.Table
+        $table.CellSpacing = 0
+        $border = New-Object System.Windows.Thickness(0,0,0,1)
+        foreach ($col in @('Titre','Categorie','Taille (Mo)','Ajoute','Description')) {
+            $c = New-Object System.Windows.Documents.TableColumn
+            $c.Width = [System.Windows.GridLength]::new(@(240,90,80,90,300)[$table.Columns.Count])
+            $table.Columns.Add($c)
+        }
+        $rg = New-Object System.Windows.Documents.TableRowGroup
+        $hr = New-Object System.Windows.Documents.TableRow
+        foreach ($h in @('Titre','Categorie','Taille (Mo)','Ajoute','Description')) {
+            $cell = New-Object System.Windows.Documents.TableCell(New-Object System.Windows.Documents.Paragraph(New-Object System.Windows.Documents.Run($h)))
+            $cell.FontWeight = 'Bold'
+            $cell.BorderBrush = [System.Windows.Media.Brushes]::Gray
+            $cell.BorderThickness = $border
+            $cell.Padding = New-Object System.Windows.Thickness(4)
+            [void]$hr.Cells.Add($cell)
+        }
+        [void]$rg.Rows.Add($hr)
+        foreach ($r in $rows) {
+            $tr = New-Object System.Windows.Documents.TableRow
+            foreach ($v in @($r.Title, $r.Category, $r.SizeMB, $r.Added, $r.Description)) {
+                $vv = if ($null -ne $v) { [string]$v } else { '' }
+                $cell = New-Object System.Windows.Documents.TableCell(New-Object System.Windows.Documents.Paragraph(New-Object System.Windows.Documents.Run($vv)))
+                $cell.BorderBrush = [System.Windows.Media.Brushes]::LightGray
+                $cell.BorderThickness = $border
+                $cell.Padding = New-Object System.Windows.Thickness(4)
+                [void]$tr.Cells.Add($cell)
+            }
+            [void]$rg.Rows.Add($tr)
+        }
+        [void]$table.RowGroups.Add($rg)
+        $doc.Blocks.Add($table)
+        $dlg.PrintDocument($doc, "Index CD Repository")
+        Set-Status "Impression envoyee : $($rows.Count) disque(s)."
+    }
+    catch { Set-Status "Impression impossible : $($_.Exception.Message)" -Error }
 })
 
 $controls['BtnClear'].Add_Click({
