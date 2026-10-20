@@ -736,19 +736,30 @@ function Invoke-CdAudioRipInternal {
                             if ($exts -contains $f.Extension.ToLower()) { $libFiles += $f }
                         }
                     }
-                    if ($libFiles.Count -eq 0) {
-                        Write-ModuleTrace 'Rip audio : album introuvable par titre ; balayage de la bibliotheque audio WMP par date de fichier...'
-                        $allAudio = $wmp.mediaCollection.getByAttribute('MediaType', 'audio')
-                        $allCount = 0
-                        if ($allAudio) { $allCount = $allAudio.count }
-                        Write-ModuleTrace "Rip audio : $allAudio.Count piste(s) audio au total."
-                        for ($i = 0; $i -lt $allCount; $i++) {
-                            $u = $allAudio.item($i).sourceURL
-                            if (-not $u -or -not (Test-Path -LiteralPath $u)) { continue }
-                            $f = Get-Item -LiteralPath $u
-                            if ($exts -contains $f.Extension.ToLower() -and $f.LastWriteTime -ge $ripStart.AddSeconds(-5)) {
-                                $libFiles += $f
+                    if ($libFiles.Count -eq 0 -and $plCount -gt 0) {
+                        Write-ModuleTrace 'Rip audio : album introuvable par titre ; rapprochement par duree des pistes du CD...'
+                        $cdDurations = @{}
+                        for ($i = 0; $i -lt $plCount; $i++) {
+                            try { $cdDurations[[math]::Round($pl.item($i).duration)] = $true } catch { }
+                        }
+                        if ($cdDurations.Count -gt 0) {
+                            $allAudio = $wmp.mediaCollection.getByAttribute('MediaType', 'audio')
+                            $allCount = 0
+                            if ($allAudio) { $allCount = $allAudio.count }
+                            Write-ModuleTrace "Rip audio : $allCount piste(s) audio au total dans la bibliotheque WMP."
+                            for ($i = 0; $i -lt $allCount; $i++) {
+                                $m = $allAudio.item($i)
+                                $u = $m.sourceURL
+                                if (-not $u -or -not (Test-Path -LiteralPath $u)) { continue }
+                                $f = Get-Item -LiteralPath $u
+                                if ($exts -notcontains $f.Extension.ToLower()) { continue }
+                                $dur = -1
+                                try { $dur = [math]::Round($m.duration) } catch { }
+                                if ($dur -ge 0 -and $cdDurations.ContainsKey($dur)) {
+                                    $libFiles += $f
+                                }
                             }
+                            Write-ModuleTrace "Rip audio : $($libFiles.Count) piste(s) correspondant aux durees du CD."
                         }
                     }
                 }
