@@ -13,8 +13,17 @@ param(
     Affiche et journalise toutes les erreurs non gerees (fichier CdRepositoryGui.log a cote du script).
 #>
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ($env:CDREPO_GUI_FORKED -ne '1') {
+    $env:CDREPO_GUI_FORKED = '1'
+    $forkArgs = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File', (Join-Path $here 'CdRepositoryGui.ps1'))
+    if ($VerboseErrors) { $forkArgs += '-VerboseErrors' }
+    Write-Host "Relancement dans un processus dedie (garantit un AppDomain WPF vierge)..."
+    $child = Start-Process -FilePath 'powershell.exe' -ArgumentList $forkArgs -PassThru
+    $child.WaitForExit()
+    $env:CDREPO_GUI_FORKED = $null
+    exit $child.ExitCode
+}
 
 $script:VerboseErrors = [bool]$VerboseErrors
 $script:LogFile = Join-Path $here 'CdRepositoryGui.log'
