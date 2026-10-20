@@ -1146,6 +1146,9 @@ function Copy-CdToRepository {
                 }
                 catch {
                     $lastErr = $_.Exception.Message
+                    if ($lastErr -match 'chiffre|crypte|protection contre la copie|Copy Protection') {
+                        throw "Le disque est protege contre la copie (chiffrement CSS/secteur chiffre - fichier $($f.Name)). Les DVD video commerciaux ne peuvent pas etre archives par simple copie de fichiers : l arret est immediate. Detail : $lastErr"
+                    }
                     Write-ModuleTrace "Copie locale : echec $try/3 pour $($f.Name) : $lastErr"
                     if (Test-Path $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue }
                     if ($try -lt 3) {
