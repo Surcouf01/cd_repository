@@ -973,7 +973,6 @@ function Invoke-ElevatedCdOperation {
                     exit
                 }
                 if ('$Operation' -eq 'dismount' -and '$memoIso' -and (Test-Path '$memoIso')) {
-                    Write-TraceLog "[ELEV-ENFANT] Demontage de la copie locale memoisee : $memoIso" -Color 'DarkYellow'
                     if (Test-Path '$memoIso') {
                         Dismount-DiskImage -ImagePath '$memoIso' -ErrorAction Stop | Out-Null
                         Remove-Item -LiteralPath '$memoIso' -Force -ErrorAction SilentlyContinue
