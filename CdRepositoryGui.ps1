@@ -110,8 +110,8 @@ $xamlText = @'
                 <Button x:Name="BtnDismount" Content="Demonter"      Width="80"  Margin="0,0,8,0" ToolTip="Demonter l'ISO selectionne"/>
                 <Button x:Name="BtnMove"  Content="Deplacer..."      Width="90"  Margin="0,0,8,0" ToolTip="Changer la categorie du CD selectionne"/>
                 <Button x:Name="BtnDelete" Content="Supprimer"       Width="80"  Margin="0,0,8,0" ToolTip="Supprimer le CD selectionne (fichier + index)"/>
-                <Button x:Name="BtnRefresh" Content="Actualiser"     Width="85"  Margin="0,0,0,0"/>
             </StackPanel>
+            <Button x:Name="BtnRefresh" Content="Actualiser" Width="85" DockPanel.Dock="Right" Margin="0,0,8,0" ToolTip="Recharger l index depuis le NAS"/>
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                 <Grid Width="220">
                     <TextBox x:Name="TxtSearch" Height="24" VerticalContentAlignment="Center" Background="White"
