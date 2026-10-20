@@ -1021,6 +1021,21 @@ $controls['BtnMount'].Add_Click({
     if (-not $sel) { return }
     Wait-Cursor {
         try {
+            # Conteneur audio (dossier, pas ISO) : mappage net use sans elevation -
+            # la session utilisateur porte les identifiants SMB du NAS.
+            $cfg = Import-CdConfig
+            $idx = Get-CdIndex
+            $e = @($idx.disks) | Where-Object { $_.id -eq $sel.Id }
+            if ($e) {
+                $p = Join-Path (Join-Path $cfg.RepositoryRoot (Get-MediaCategory $e.category)) $e.fileName
+                if (Test-Path $p -PathType Container) {
+                    $m = Mount-CdFromRepository -Id $sel.Id
+                    Set-Status "Monte sur $($m.Letter): . Ouverture de l'Explorateur..."
+                    if ($m.Letter) { Start-Process "explorer.exe" ("$($m.Letter):\") }
+                    else { Set-Status "Ouverture directe du dossier (mappage impossible)." }
+                    return
+                }
+            }
             $m = $null
             if (Test-GuiAdmin) {
                 $m = Mount-CdFromRepository -Id $sel.Id
