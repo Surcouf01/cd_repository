@@ -717,7 +717,8 @@ $controls['BtnRip'].Add_Click({
         }
         try {
 
-        if ($script:JobLogPath -and (Test-Path $script:JobLogPath)) {
+        if ($env:CdRepoGuiNoLogTail) { }
+        if ($script:JobLogPath -and (Test-Path $script:JobLogPath) -and -not $env:CdRepoGuiNoLogTail) {
             try {
                 $jobLines = [System.IO.File]::ReadAllLines($script:JobLogPath)
                 for ($j = $script:JobLogPos; $j -lt $jobLines.Count; $j++) {
