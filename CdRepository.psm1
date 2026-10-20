@@ -712,6 +712,43 @@ function Invoke-CdAudioRipInternal {
         $ripped = @(Get-RippedFiles -Since $ripStart)
         Write-ModuleTrace "Rip audio : $($ripped.Count) fichier(s) trouve(s) dans le dossier Musique."
         if ($ripped.Count -eq 0) {
+            Write-ModuleTrace 'Rip audio : aucune piste nouvelle ; interrogation de la bibliotheque WMP (album deja extrait ?)...'
+            $libFiles = @()
+            $plCount = 0
+            try {
+                $pl = $cdrom.Playlist
+                if ($pl) { $plCount = $pl.count }
+                $albumTitle = $null
+                if ($plCount -gt 0) {
+                    try { $albumTitle = $pl.item(0).getItemInfo('WM/AlbumTitle') } catch { }
+                }
+                Write-ModuleTrace "Rip audio : playlist CD = $plCount piste(s), album = '$albumTitle'."
+                if ($albumTitle) {
+                    $lib = $wmp.mediaCollection.getByAlbum($albumTitle)
+                    $libCount = 0
+                    if ($lib) { $libCount = $lib.count }
+                    Write-ModuleTrace "Rip audio : $libCount piste(s) dans la bibliotheque WMP pour cet album."
+                    $exts = @('.wma','.mp3','.wav','.m4a','.flac')
+                    for ($i = 0; $i -lt $libCount; $i++) {
+                        $u = $lib.item($i).sourceURL
+                        if ($u -and (Test-Path -LiteralPath $u)) {
+                            $f = Get-Item -LiteralPath $u
+                            if ($exts -contains $f.Extension.ToLower()) { $libFiles += $f }
+                        } else {
+                            Write-ModuleTrace "Rip audio : piste bibliotheque $i introuvable sur le disque ($u)."
+                        }
+                    }
+                }
+            } catch { Write-ModuleTrace "Rip audio : interrogation de la bibliotheque WMP echouee : $($_.Exception.Message)" }
+            $libFiles = @($libFiles | Sort-Object -Property FullName -Unique)
+            if ($libFiles.Count -gt 0 -and ($plCount -eq 0 -or $libFiles.Count -ge $plCount)) {
+                Write-ModuleTrace "Rip audio : album deja extrait par WMP - reutilisation de $($libFiles.Count) fichier(s) existant(s)."
+                if ($ProgressCallback) { & $ProgressCallback 100 'Album deja extrait : fichiers WMP reutilises.' }
+                return $libFiles
+            }
+            if ($libFiles.Count -gt 0) {
+                throw "Le rip n a pas produit de fichier et la bibliotheque WMP ne contient que $($libFiles.Count) piste(s) sur $plCount (extraction partielle d un run precedent). Supprimez l album de la bibliotheque WMP (de mon ordinateur inclus) puis relancez."
+            }
             throw ("Le rip s arrete immediatement sans produire de fichier. Causes connues : (1) les pistes de ce CD ont deja ete extraites par WMP lors d un run precedent - supprimez l album de la bibliotheque WMP ou utilisez un autre CD ; (2) dossier d extraction invalide dans WMP (Options > Extraire de la musique) ; (3) WMP n a jamais ete lance une premiere fois (relancez-le manuellement et verifiez que l extraction manuelle fonctionne).")
         }
         return $ripped
