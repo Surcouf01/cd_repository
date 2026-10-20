@@ -1226,12 +1226,15 @@ function Mount-CdFromRepository {
     if (-not $entry) { throw "Aucun disque avec l'id '$Id' dans l'index." }
     $cat = Get-MediaCategory $entry.category
     $iso = Join-Path (Join-Path $cfg.RepositoryRoot $cat) $entry.fileName
+    # CD audio : contenu stocke en dossier (pas un ISO) - ouverture directe,
+    # aucun montage necessaire ni elevation. Verifie AVANT le chemin ISO :
+    # un dossier existe bien (Test-Path true) mais n'est pas montable.
+    if (Test-Path $iso -PathType Container) {
+        Write-Host "Conteneur audio : contenu disponible dans $iso (pas de montage necessaire)."
+        Start-Process "explorer.exe" $iso
+        return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
+    }
     if (-not (Test-Path $iso)) {
-        if ($entry.sourceLabel -eq 'CD Audio' -and (Test-Path $iso -PathType Container)) {
-            Write-Host "CD audio : contenu disponible dans $iso (pas de montage necessaire)."
-            Start-Process "explorer.exe" $iso
-            return [pscustomobject]@{ Letter = ''; Image = $null; Id = $Id }
-        }
         throw "Fichier ISO manquant : $iso"
     }
 
