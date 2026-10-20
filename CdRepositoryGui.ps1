@@ -59,6 +59,13 @@ Import-Module (Join-Path $here 'CdRepository.psd1') -Force
 Write-TraceLog "Module importe."
 
 Write-TraceLog '--- Verification des prerequis ---' -Color 'Cyan'
+try {
+    Write-TraceLog '--- Resynchronisation de l index depuis le NAS ---' -Color 'Cyan'
+    $sync = Sync-CdIndexFromDisk
+    Write-TraceLog ("Index resynchronise : +{0} ajoute(s), {1} manquant(s), {2} ISO invalide(s), {3} categorie inconnue(s)." -f $sync.Added, $sync.Missing, $sync.Invalid, $sync.CategoryUnknown) -Color 'DarkCyan'
+} catch {
+    Write-TraceLog "Resynchronisation de l index impossible : $($_.Exception.Message)" -Color 'Red'
+}
 $script:Requirements = $null
 try {
     $req = Test-CdRepositoryRequirements
@@ -353,6 +360,8 @@ function Update-DiskGrid {
         }
         $desc = ''
         if ($d.PSObject.Properties['description']) { $desc = $d.description }
+        $flags = @()
+        if ($d.PSObject.Properties['syncFlags']) { $flags = @($d.syncFlags) }
         $viewModels.Add([pscustomobject]@{
             Id          = $d.id
             Title       = $d.title
@@ -360,9 +369,19 @@ function Update-DiskGrid {
             SizeMB      = [math]::Round($sz / 1MB, 1)
             Added       = $added
             Description = $desc
+            Flags       = ($flags -join ', ')
+            RowColor    = $(if ($flags -contains 'FICHIER_MANQUANT' -or $flags -contains 'ISO_INVALIDE') { '#C0392B' }
+                             elseif ($flags -contains 'CATEGORIE_INCONNUE') { '#D97706' }
+                             elseif ($flags -contains 'AJOUTE_PAR_SCAN') { '#1F618D' }
+                             else { '' })
         })
     }
     Set-Status "$($viewModels.Count) disque(s) affiche(s)."
+    foreach ($i in 0..($viewModels.Count - 1)) {
+        if ($viewModels[$i].RowColor) {
+            $controls['GridDisks'].Rows[$i].Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString($viewModels[$i].RowColor)
+        }
+    }
 }
 
 function Update-ContentPane {

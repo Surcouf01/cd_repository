@@ -34,6 +34,86 @@ function Import-CdConfig {
     return $cfg
 }
 
+function Sync-CdIndexFromDisk {
+    [CmdletBinding()]
+    param([switch]$NoSave)
+    $cfg = Import-CdConfig
+    New-CdIndex | Out-Null
+    $index = Get-CdIndex
+    $cats = Get-CdCategories
+    $disks = @($index.disks)
+    $added = 0
+    $missing = 0
+    $invalid = 0
+    $catOut = 0
+    # 1. Marquer les entrees existantes selon l'etat reel du NAS
+    $marked = @()
+    foreach ($d in $disks) {
+        $dc = $null
+        if ($d.PSObject.Properties['category']) { $dc = $d.category }
+        $cat = Get-MediaCategory $dc
+        $fn = $null
+        if ($d.PSObject.Properties['fileName']) { $fn = $d.fileName }
+        $path = if ($fn) { Join-Path (Join-Path $cfg.RepositoryRoot $cat) $fn } else { $null }
+        $exists = $path -and (Test-Path -LiteralPath $path)
+        $isoOk = $true
+        if ($exists -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $ext = [System.IO.Path]::GetExtension($path).ToLower()
+            if ($ext -eq '.iso') {
+                $sz = 0
+                try { $sz = (Get-Item -LiteralPath $path -ErrorAction Stop).Length } catch { }
+                if ($sz -lt 2048) { $isoOk = $false }
+            }
+        }
+        $flags = @()
+        if (-not $exists) { $flags += 'FICHIER_MANQUANT'; $missing++ }
+        elseif (-not $isoOk) { $flags += 'ISO_INVALIDE'; $invalid++ }
+        if ($cats -notcontains $cat) { $flags += 'CATEGORIE_INCONNUE'; $catOut++ }
+        $marked += [pscustomobject]@{
+            id          = $d.id
+            title       = $d.title
+            description = $(if ($d.PSObject.Properties['description']) { $d.description } else { '' })
+            category    = $cat
+            fileName    = $fn
+            sizeBytes   = $(if ($d.PSObject.Properties['sizeBytes'] -and $d.sizeBytes) { $d.sizeBytes } else { 0 })
+            addedUtc    = $(if ($d.PSObject.Properties['addedUtc'] -and $d.addedUtc) { $d.addedUtc } else { '' })
+            sourceLabel = $(if ($d.PSObject.Properties['sourceLabel']) { $d.sourceLabel } else { '' })
+            contents    = $(if ($d.PSObject.Properties['contents']) { $d.contents } else { @() })
+            readErrors  = $(if ($d.PSObject.Properties['readErrors']) { $d.readErrors } else { @() })
+            syncFlags   = $flags
+        }
+    }
+    # 2. Completer : fichiers ISO presents sur le NAS mais absents de l'index
+    $known = @($marked | ForEach-Object { "$($_.category)\$($_.fileName)" })
+    foreach ($c in $cats) {
+        $catDir = Join-Path $cfg.RepositoryRoot $c
+        if (-not (Test-Path -LiteralPath $catDir)) { continue }
+        foreach ($f in @(Get-ChildItem -LiteralPath $catDir -File -Filter '*.iso' -ErrorAction SilentlyContinue)) {
+            $key = "$c\$($f.Name)"
+            if ($known -contains $key) { continue }
+            $marked += [pscustomobject]@{
+                id          = [guid]::NewGuid().ToString()
+                title       = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
+                description = 'Ajout automatique (scan NAS), non reference avant'
+                category    = $c
+                fileName    = $f.Name
+                sizeBytes   = [long]$f.Length
+                addedUtc    = $f.LastWriteTime.ToUniversalTime().ToString('o')
+                sourceLabel = ''
+                contents    = @()
+                readErrors  = @()
+                syncFlags   = @('AJOUTE_PAR_SCAN')
+            }
+            $added++
+        }
+    }
+    if (-not $NoSave) {
+        Save-CdIndex -Index ([pscustomobject]@{ version = $index.version; disks = $marked })
+    }
+    Write-Host "Index resynchronise : +$added ajoute(s), $missing fichier(s) manquant(s), $invalid ISO invalide(s), $catOut categorie inconnue(s)."
+    return [pscustomobject]@{ Index = $marked; Added = $added; Missing = $missing; Invalid = $invalid; CategoryUnknown = $catOut }
+}
+
 function New-CdIndex {
     [CmdletBinding()]
     param([string]$Path = $script:IndexFile)
@@ -1378,5 +1458,5 @@ Export-ModuleMember -Function @(
     'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Invoke-CdAudioRipInternal','Get-KnownMusicFolder','Get-RippedFiles','Get-WmpRipFolder',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
-    'Get-CdCategories','Update-CdCategories','Move-CdEntry'
+    'Get-CdCategories','Update-CdCategories','Move-CdEntry','Sync-CdIndexFromDisk'
 )
