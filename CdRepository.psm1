@@ -775,8 +775,19 @@ function Invoke-CdAudioRipInternal {
                 if ($ProgressCallback) { & $ProgressCallback 100 'Album deja extrait : fichiers WMP reutilises.' }
                 return $libFiles
             }
-            if ($libFiles.Count -gt 0) {
-                throw "Le rip n a pas produit de fichier et la bibliotheque WMP ne contient que $($libFiles.Count) piste(s) sur $plCount (extraction partielle d un run precedent). Supprimez l album de la bibliotheque WMP (de mon ordinateur inclus) puis relancez."
+            if ($libFiles.Count -gt 0 -and $libFiles.Count -lt $plCount) {
+                Write-ModuleTrace "Rip audio : extraction partielle detectee ($($libFiles.Count)/$plCount). Suppression des $($libFiles.Count) fichier(s) partiels pour forcer une re-extraction complete..."
+                foreach ($f in $libFiles) {
+                    try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop } catch { Write-ModuleTrace "Rip audio : suppression impossible de $($f.FullName) : $($_.Exception.Message)" }
+                }
+                $parent = ($libFiles | Select-Object -First 1).DirectoryName
+                if ($parent) {
+                    try {
+                        $rest = Get-ChildItem -LiteralPath $parent -File -ErrorAction SilentlyContinue
+                        if (-not $rest -or $rest.Count -eq 0) { Remove-Item -LiteralPath $parent -Force -ErrorAction SilentlyContinue }
+                    } catch { }
+                }
+                throw "Extraction partielle d un run precedent detectee ($($libFiles.Count) piste(s) sur $plCount). Les fichiers partiels ont ete supprimes ; relancez la copie : WMP re-extraira le CD complet."
             }
             throw ("Le rip s arrete immediatement sans produire de fichier. Causes connues : (1) les pistes de ce CD ont deja ete extraites par WMP lors d un run precedent - supprimez l album de la bibliotheque WMP ou utilisez un autre CD ; (2) dossier d extraction invalide dans WMP (Options > Extraire de la musique) ; (3) WMP n a jamais ete lance une premiere fois (relancez-le manuellement et verifiez que l extraction manuelle fonctionne).")
         }
