@@ -1180,6 +1180,7 @@ function Copy-CdToRepository {
         if (-not (Test-Path $isoPath)) { throw "La creation de l'ISO a echoue." }
         $size = (Get-Item $isoPath).Length
         Write-Host "OK : $isoPath ($([math]::Round($size/1MB,1)) Mo)"
+        Write-ModuleTrace "Etape post-ISO (1/4) : ISO ecrit, taille=$size octets."
         if ($ProgressCallback) { & $ProgressCallback 96 'Mise a jour de l''index...' }
 
         if (-not $NoIndex) {
@@ -1204,7 +1205,9 @@ function Copy-CdToRepository {
                 readErrors  = @($readErrors)
             }
             $newDisks = @($index.disks) + @($entry)
+            Write-ModuleTrace "Etape post-ISO (3/4) : ecriture de l index ($($newDisks.Count) entree(s)) sur le NAS..."
             Save-CdIndex -Index ([pscustomobject]@{ version = 1; disks = $newDisks })
+            Write-ModuleTrace 'Etape post-ISO (4/4) : verification post-ecriture...'
             $check = Get-CdIndex
             if (@($check.disks | Where-Object { $_.id -eq $entry.id }).Count -eq 0) {
                 throw "Echec de l ecriture de l index : verification post-ecriture negative."
@@ -1213,7 +1216,9 @@ function Copy-CdToRepository {
         }
     }
     finally {
+        Write-ModuleTrace "Nettoyage du dossier temporaire local ($tempRoot)..."
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Write-ModuleTrace 'Nettoyage termine.'
     }
     if (Test-Path $isoPath) { Write-Output $isoPath }
 }
