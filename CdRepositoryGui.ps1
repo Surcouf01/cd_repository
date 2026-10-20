@@ -13,6 +13,8 @@ param(
     Affiche et journalise toutes les erreurs non gerees (fichier CdRepositoryGui.log a cote du script).
 #>
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 

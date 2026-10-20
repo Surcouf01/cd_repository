@@ -6,6 +6,8 @@
     powershell -ExecutionPolicy Bypass -File .\Start-CdRepository.ps1
 #>
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Import-Module (Join-Path $here 'CdRepository.psd1') -Force
