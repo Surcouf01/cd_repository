@@ -596,6 +596,21 @@ function Invoke-CdAudioRipInternal {
         $driveCount = 0
         try { $driveCount = $cdroms.count } catch { }
         Write-ModuleTrace "Rip audio : $driveCount lecteur(s) dans la collection."
+        $cdrom = $cdroms.getByDriveSpecifier("${drive}:")
+        if (-not $cdrom) { throw "Lecteur ${drive}: introuvable dans la collection WMP." }
+        Write-ModuleTrace 'Rip audio : attente de l indexation du CD par WMP (playlist)...'
+        $idxDeadline = (Get-Date).AddSeconds(30)
+        $idxCount = -1
+        while ((Get-Date) -lt $idxDeadline) {
+            $n = -1
+            try { $pl = $cdrom.Playlist; if ($pl) { $n = $pl.count } } catch { }
+            if ($n -gt 0) {
+                if ($n -eq $idxCount) { break }
+                $idxCount = $n
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        Write-ModuleTrace "Rip audio : playlist du CD peuplee ($idxCount piste(s))."
         if ($ProgressCallback) { & $ProgressCallback 0 "CD audio detecte dans ${drive}:. Extraction..." }
 
         $ripStart = Get-Date
