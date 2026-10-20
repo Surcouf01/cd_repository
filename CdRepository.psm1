@@ -379,8 +379,13 @@ function Get-WmpRipFolder {
     param()
     try {
         $p = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\MediaPlayer\Preferences' -ErrorAction Stop
-        if ($p.CDRipPath -and (Test-Path $p.CDRipPath)) { return $p.CDRipPath }
-    } catch { }
+        if ($p.CDRipPath) {
+            Write-ModuleTrace "Rip audio : CDRipPath registre = '$($p.CDRipPath)' (existe: $(Test-Path $p.CDRipPath)))."
+            if (Test-Path $p.CDRipPath) { return $p.CDRipPath }
+        } else {
+            Write-ModuleTrace 'Rip audio : CDRipPath absent du registre WMP.'
+        }
+    } catch { Write-ModuleTrace "Rip audio : lecture des preferences WMP impossible : $($_.Exception.Message)" }
     return $null
 }
 
@@ -392,6 +397,7 @@ function Get-RippedFiles {
     if ($wmpRoot) { [void]$roots.Add($wmpRoot) }
     try { [void]$roots.Add((Get-KnownMusicFolder)) } catch { }
     $exts = @('.wma','.mp3','.wav','.m4a','.flac')
+    if ($roots.Count -eq 0) { [void]$roots.Add($env:USERPROFILE) }
     $files = @()
     foreach ($root in $roots) {
         if (-not $root -or -not (Test-Path $root)) { continue }
