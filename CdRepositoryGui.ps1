@@ -179,7 +179,11 @@ $xamlText = @'
         <!-- Barre d'etat -->
         <StatusBar Grid.Row="4" Margin="0,8,0,0">
             <StatusBarItem>
-                <TextBlock x:Name="TxtStatus" Text="Pret."/>
+                <TextBox x:Name="TxtStatus" Text="Pret." IsReadOnly="True"
+                         BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"
+                         Padding="0" Margin="0"
+                         Focusable="True" Cursor="IBeam"
+                         ToolTip="Message d'etat - selectionnable/copiable"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>
@@ -208,6 +212,16 @@ function Set-Status {
     if ($Error) { $controls['TxtStatus'].Foreground = 'Red' }
     else { $controls['TxtStatus'].Foreground = 'Black' }
 }
+$controls['TxtStatus'].Add_GotKeyboardFocus({
+    if ($controls['TxtStatus'].SelectionLength -eq 0) { $controls['TxtStatus'].SelectAll() }
+})
+$controls['TxtStatus'].Add_PreviewMouseLeftButtonDown({
+    if (-not $controls['TxtStatus'].IsKeyboardFocusWithin) {
+        $controls['TxtStatus'].Focus()
+        $controls['TxtStatus'].SelectAll()
+        $_.Handled = $true
+    }
+})
 
 function Show-CopyOverlay {
     param([string]$Title, [string]$SourceLetter)
