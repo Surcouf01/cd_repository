@@ -374,13 +374,32 @@ function Get-KnownMusicFolder {
     throw "Dossier Musique introuvable."
 }
 
+function Get-WmpRipFolder {
+    [CmdletBinding()]
+    param()
+    try {
+        $p = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\MediaPlayer\Preferences' -ErrorAction Stop
+        if ($p.CDRipPath -and (Test-Path $p.CDRipPath)) { return $p.CDRipPath }
+    } catch { }
+    return $null
+}
+
 function Get-RippedFiles {
     [CmdletBinding()]
     param([Parameter(Mandatory)][datetime]$Since)
-    $musicRoot = Get-KnownMusicFolder
+    $roots = New-Object System.Collections.ArrayList
+    $wmpRoot = Get-WmpRipFolder
+    if ($wmpRoot) { [void]$roots.Add($wmpRoot) }
+    try { [void]$roots.Add((Get-KnownMusicFolder)) } catch { }
     $exts = @('.wma','.mp3','.wav','.m4a','.flac')
-    $files = @(Get-ChildItem -LiteralPath $musicRoot -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $exts -contains $_.Extension.ToLower() -and $_.LastWriteTime -ge $Since.AddSeconds(-5) })
+    $files = @()
+    foreach ($root in $roots) {
+        if (-not $root -or -not (Test-Path $root)) { continue }
+        Write-ModuleTrace "Rip audio : scan des fichiers produits sous $root"
+        $files += @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $exts -contains $_.Extension.ToLower() -and $_.LastWriteTime -ge $Since.AddSeconds(-5) })
+    }
+    $files = @($files | Sort-Object -Property FullName -Unique)
     if ($files.Count -eq 0) { return @() }
     $newestDir = ($files | Sort-Object LastWriteTime -Descending | Select-Object -First 1).DirectoryName
     return @($files | Where-Object { $_.DirectoryName -eq $newestDir -or $files.Count -le 30 })
@@ -1262,7 +1281,7 @@ function Move-CdEntry {
 Export-ModuleMember -Function @(
     'Import-CdConfig','New-CdIndex','Get-CdIndex','Save-CdIndex',
     'Get-DriveLettersInUse','Get-MediaCategory','New-IsoImageFromDirectory',
-    'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Invoke-CdAudioRipInternal','Get-KnownMusicFolder','Get-RippedFiles',
+    'Test-CdRepositoryRequirements','Test-CdIsAudio','Invoke-CdAudioRip','Invoke-CdAudioRipInternal','Get-KnownMusicFolder','Get-RippedFiles','Get-WmpRipFolder',
     'Copy-CdToRepository','Mount-CdFromRepository','Dismount-CdFromRepository',
     'Remove-CdFromRepository','Show-CdIndex','Search-CdIndex','Show-CdContent',
     'Get-CdCategories','Update-CdCategories','Move-CdEntry'
