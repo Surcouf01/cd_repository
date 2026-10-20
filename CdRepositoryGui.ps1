@@ -884,16 +884,32 @@ $controls['BtnDelete'].Add_Click({
     $delPs = [powershell]::Create()
     $delPs.Runspace = $delRunspace
     $delModule = Join-Path $here 'CdRepository.psd1'
+    $delLog = Join-Path $env:TEMP 'CdRepositoryGui.log'
     $null = $delPs.AddScript({
-        param($ModulePath, $Id)
+        param($ModulePath, $Id, $LogPath)
+        try { Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [DELETE] Debut : import du module..." -Encoding UTF8 } catch { }
         Import-Module $ModulePath -Force
+        try { Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [DELETE] Module importe. Suppression en cours (NAS)..." -Encoding UTF8 } catch { }
         Remove-CdFromRepository -Id $Id
-    }).AddArgument($delModule).AddArgument($delId)
+        try { Add-Content -Path $LogPath -Value "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [DELETE] Suppression terminee." -Encoding UTF8 } catch { }
+    }).AddArgument($delModule).AddArgument($delId).AddArgument($delLog)
     $delAsync = $delPs.BeginInvoke()
+    $script:DelStart = Get-Date
     $delTimer = New-Object System.Windows.Threading.DispatcherTimer
     $delTimer.Interval = [TimeSpan]::FromMilliseconds(400)
     $delTimer.Add_Tick({
-        if (-not $delAsync.IsCompleted) { return }
+        if (-not $delAsync.IsCompleted) {
+            if (((Get-Date) - $script:DelStart).TotalSeconds -gt 60) {
+                $delTimer.Stop()
+                try { $delPs.Stop() } catch { }
+                try { $delPs.Dispose() } catch { }
+                try { $delRunspace.Dispose() } catch { }
+                $window.Cursor = 'Arrow'
+                $script:Busy = $false
+                Set-Status "Suppression interrompue : le NAS n a pas repondu en 60 s (fichier verrouille ou SMB bloque). Verifiez que le fichier n est pas ouvert sur le NAS." -Error
+            }
+            return
+        }
         $delTimer.Stop()
         try {
             $null = $delPs.EndInvoke($delAsync)
