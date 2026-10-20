@@ -1359,7 +1359,7 @@ function Dismount-CdFromRepository {
         }
         if ($letter) {
             if ($isUnc) {
-                $out = & net use "${letter}:" /delete 2>&1
+                $out = & net use "${letter}:" /delete /y 2>&1
                 $code = $LASTEXITCODE
             } else {
                 $out = & subst "${letter}: /d" 2>&1

@@ -1106,7 +1106,11 @@ $controls['BtnDismount'].Add_Click({
             if ($e) {
                 $p = Join-Path (Join-Path $cfg.RepositoryRoot (Get-MediaCategory $e.category)) $e.fileName
                 if (Test-Path $p -PathType Container) {
-                    Dismount-CdFromRepository -Id $sel.Id
+                    try { Dismount-CdFromRepository -Id $sel.Id }
+                    catch {
+                        Set-Status "Demontage impossible : $($_.Exception.Message)" -Error
+                        return
+                    }
                     Set-Status "Demonte : $($sel.Title)"
                     return
                 }
