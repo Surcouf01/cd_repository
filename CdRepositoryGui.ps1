@@ -220,6 +220,10 @@ $xamlText = @'
 
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xamlText)
 $window = [Windows.Markup.XamlReader]::Load($reader)
+try {
+    $iconPath = Join-Path $here 'assets\jukebox.ico'
+    if (Test-Path $iconPath) { $window.Icon = New-Object System.Windows.Media.Imaging.BitmapImage([Uri]::new($iconPath)) }
+} catch { }
 
 $controls = @{}
 foreach ($n in 'BtnRip','BtnMount','BtnDismount','BtnMove','BtnDelete','BtnRefresh',
