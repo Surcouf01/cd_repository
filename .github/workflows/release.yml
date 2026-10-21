@@ -1,0 +1,45 @@
+name: Release (ps2exe)
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer ps2exe
+        shell: pwsh
+        run: Install-Module -Name ps2exe -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Compiler CdRepositoryGui.exe
+        shell: pwsh
+        run: |
+          Invoke-PS2EXE -Input .\CdRepositoryGui.ps1 -Output .\CdRepositoryGui.exe `
+            -STA -noConsole -title 'CD Repository' -description 'Interface du repository de compact disks (NAS Synology)' `
+            -productVersion '1.0.0' -fileVersion '1.0.0'
+
+      - name: Preparer le paquet
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          Copy-Item CdRepositoryGui.exe package/
+          Copy-Item CdRepository.psd1 package/
+          Copy-Item CdRepository.psm1 package/
+          Copy-Item Copy-CdJob.ps1 package/
+          Copy-Item Rip-CdJob.ps1 package/
+          Copy-Item Start-CdRepository.ps1 package/
+          if (Test-Path config.json) { Copy-Item config.json package/ } else { Copy-Item config.example.json package/ }
+          Copy-Item README.md package/
+          Compress-Archive -Path package/* -DestinationPath CdRepository-${{ github.ref_name }}.zip
+
+      - name: Publier la release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: CdRepository-${{ github.ref_name }}.zip
+          generate_release_notes: true
