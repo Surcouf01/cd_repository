@@ -21,8 +21,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-PS2EXE -Input .\CdRepositoryGui.ps1 -Output .\CdRepositoryGui.exe `
-            -STA -noConsole -title 'CD Repository' -description 'Interface du repository de compact disks (NAS Synology)' `
-            -productVersion '1.0.0' -fileVersion '1.0.0'
+            -STA -noConsole -title 'CD Repository' -description 'Interface du repository de compact disks (NAS Synology)'
 
       - name: Preparer le paquet
         shell: pwsh
