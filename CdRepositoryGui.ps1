@@ -12,8 +12,12 @@ param(
     powershell -ExecutionPolicy Bypass -File .\CdRepositoryGui.ps1 -VerboseErrors
     Affiche et journalise toutes les erreurs non gerees (fichier CdRepositoryGui.log a cote du script).
 #>
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+# En mode exe sans console (ps2exe -noConsole), les proprietes [Console] n'existent
+# pas : l'encodage ne peut etre configure que si une console est attachee.
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+} catch { }
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $here = $null
