@@ -16,7 +16,14 @@ param(
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$here = $null
+try { $here = Split-Path -Parent $MyInvocation.MyCommand.Path } catch { }
+if (-not $here -or -not (Test-Path (Join-Path $here 'CdRepository.psd1'))) {
+    # Mode exe (ps2exe) : le script embarque n a pas de chemin ; utiliser le dossier de l exe,
+    # qui doit etre place aux cotes du module et de la config.
+    try { $here = Split-Path -Parent ([Environment]::GetCommandLineArgs()[0]) } catch { }
+}
+if (-not $here) { throw "Repertoire du module introuvable : placez CdRepository.exe a cote de CdRepository.psd1." }
 
 $script:VerboseErrors = [bool]$VerboseErrors
 $script:LogFile = Join-Path $here 'CdRepositoryGui.log'
