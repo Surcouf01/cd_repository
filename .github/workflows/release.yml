@@ -36,6 +36,8 @@ jobs:
           Copy-Item Start-CdRepository.ps1 package/
           if (Test-Path config.json) { Copy-Item config.json package/ } else { Copy-Item config.example.json package/ }
           Copy-Item README.md package/
+          New-Item -ItemType Directory -Path package/assets -Force | Out-Null
+          Copy-Item assets/jukebox.ico package/assets/
           Compress-Archive -Path package/* -DestinationPath CdRepository-${{ github.ref_name }}.zip
 
       - name: Publier la release
